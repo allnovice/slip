@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import kotlinx.coroutines.launch
 import java.util.Calendar
 
 private enum class TimePickerTarget {
@@ -50,21 +51,28 @@ fun SettingsScreen(
     onRequestPermissions: () -> Unit
 ) {
     val context = LocalContext.current
-    var tempSettings by remember { mutableStateOf(settings) }
+    var tempSettings by remember(settings) { mutableStateOf(settings) }
     var showTimePickerFor by remember { mutableStateOf<TimePickerTarget?>(null) }
-
+    val coroutineScope = rememberCoroutineScope()
     showTimePickerFor?.let { target ->
         TimePickerDialog(
             onDismiss = { showTimePickerFor = null },
             onConfirm = { hour, minute ->
                 val newTime = UserTime(hour, minute)
-                tempSettings = when (target) {
+                val newSettings = when (target) {
                     TimePickerTarget.WeekdayStart -> tempSettings.copy(weekdaySleepStart = newTime)
                     TimePickerTarget.WeekdayEnd -> tempSettings.copy(weekdaySleepEnd = newTime)
                     TimePickerTarget.WeekendStart -> tempSettings.copy(weekendSleepStart = newTime)
                     TimePickerTarget.WeekendEnd -> tempSettings.copy(weekendSleepEnd = newTime)
                 }
+                tempSettings = newSettings
                 showTimePickerFor = null
+
+                // --- FIX 2: Auto-save the new settings inside a coroutine ---
+                coroutineScope.launch {
+                    onSettingsChanged(newSettings)
+                    Toast.makeText(context, "Settings saved", Toast.LENGTH_SHORT).show()
+                }
             },
             initialTime = when (target) {
                 TimePickerTarget.WeekdayStart -> tempSettings.weekdaySleepStart.toMillis()
@@ -74,6 +82,7 @@ fun SettingsScreen(
             }
         )
     }
+
 
     Column(
         modifier = Modifier
@@ -136,14 +145,6 @@ fun SettingsScreen(
                 Icon(Icons.Default.Download, contentDescription = "Export CSV", modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Export CSV")
-            }
-
-            // The main action button for this screen.
-            Button(onClick = {
-                onSettingsChanged(tempSettings)
-                navController.popBackStack()
-            }) {
-                Text("Save")
             }
         }
     }

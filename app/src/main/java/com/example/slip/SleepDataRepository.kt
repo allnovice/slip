@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
 
 // This part for UserSettings using DataStore is modern and can stay.
 // We will keep it alongside the Room database for sessions.
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_settings")
 
 class SleepDataRepository private constructor(
     // It now takes a DAO for session management and a DataStore for settings.
@@ -82,12 +82,17 @@ class SleepDataRepository private constructor(
 
     suspend fun saveUserSettings(newSettings: UserSettings) {
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.WEEKDAY_SLEEP_START] = newSettings.weekdaySleepStart.toString()
-            preferences[PreferencesKeys.WEEKDAY_SLEEP_END] = newSettings.weekdaySleepEnd.toString()
-            preferences[PreferencesKeys.WEEKEND_SLEEP_START] = newSettings.weekendSleepStart.toString()
-            preferences[PreferencesKeys.WEEKEND_SLEEP_END] = newSettings.weekendSleepEnd.toString()
+            // --- THIS IS THE FIX ---
+            // Add Locale.US to make the formatting consistent and safe.
+            preferences[PreferencesKeys.WEEKDAY_SLEEP_START] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekdaySleepStart.hour, newSettings.weekdaySleepStart.minute)
+            preferences[PreferencesKeys.WEEKDAY_SLEEP_END] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekdaySleepEnd.hour, newSettings.weekdaySleepEnd.minute)
+            preferences[PreferencesKeys.WEEKEND_SLEEP_START] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekendSleepStart.hour, newSettings.weekendSleepStart.minute)
+            preferences[PreferencesKeys.WEEKEND_SLEEP_END] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekendSleepEnd.hour, newSettings.weekendSleepEnd.minute)
+            // ------------------------------------
         }
     }
+
+
 
     // A private object to hold the keys for DataStore.
     private object PreferencesKeys {

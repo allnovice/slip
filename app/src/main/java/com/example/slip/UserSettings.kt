@@ -50,7 +50,8 @@ data class UserTime(val hour: Int, val minute: Int) {
 data class UserSettings(
     val weekdaySleepStart: UserTime,
     val weekdaySleepEnd: UserTime,
-    val weekendSleepStart: UserTime,val weekendSleepEnd: UserTime
+    val weekendSleepStart: UserTime,
+    val weekendSleepEnd: UserTime
 ) {
     // ... (your existing `isRealSleep` function is correct)
 
