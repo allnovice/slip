@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
+
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- Add permission for foreground service type -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"
+        tools:ignore="ForegroundServicesPolicy" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
         android:allowBackup="true"
@@ -30,30 +29,14 @@
             </intent-filter>
         </activity>
 
-        <!-- CORRECT: The <service> is a direct child of <application> -->
-        <!-- CORRECT: The <service> is a direct child of <application> -->
         <service
             android:name=".SleepTrackingService"
-            android:foregroundServiceType="health">
-            <!-- This property is required for Android 14+ to justify the FGS usage -->
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="@string/sleep_tracker_fgs_justification" />
-        </service>
+            android:exported="false"
+            android:foregroundServiceType="health" />
         <service
             android:name=".ScreenMonitorService"
-            android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
-        <!-- You should also register your BroadcastReceiver here -->
-        <receiver
-            android:name=".SleepStateReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.SCREEN_OFF" />
-                <action android:name="android.intent.action.USER_PRESENT" />
-            </intent-filter>
-        </receiver>
+            android:foregroundServiceType="health" />
 
     </application>
 
