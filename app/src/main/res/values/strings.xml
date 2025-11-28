@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">slip</string>
+    <string name="sleep_tracker_fgs_justification">Used to track sleep duration when the screen is off.</string>
+</resources>

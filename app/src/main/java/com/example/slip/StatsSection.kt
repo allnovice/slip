@@ -1,0 +1,127 @@
+package com.example.slip
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import java.util.Calendar
+
+@Composable
+fun StatsSection(
+    sessions: List<SleepSession>,
+    repository: SleepDataRepository // This is kept for potential future use, but not strictly needed for these new stats.
+) {
+    // --- 1. SETUP ---
+    // Don't show the stats section if there's no data at all.
+    if (sessions.isEmpty()) {
+        return
+    }
+    // Get the start of the 7-day window.
+    val sevenDaysAgoMillis = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
+
+    // --- 2. CALCULATIONS ---
+
+    // A) Filter for sessions in the last 7 days.
+    val recentSessions = sessions.filter { it.startTimeMillis >= sevenDaysAgoMillis }
+    // B) Filter for "real sleep" sessions in the last 7 days.
+    val recentRealSleepSessions = recentSessions.filter { it.isRealSleep == true }
+
+    // --- Avg Sleep ---
+    val weeklyAverageHours = if (recentRealSleepSessions.isNotEmpty()) {
+        (recentRealSleepSessions.sumOf { it.durationSeconds } / 7.0) / 3600.0
+    } else {
+        0.0
+    }
+
+    // --- Longest & Shortest Sleep ---
+    val longestSleepHours = (recentRealSleepSessions.maxOfOrNull { it.durationSeconds } ?: 0L) / 3600.0
+    val shortestSleepHours = (recentRealSleepSessions.minOfOrNull { it.durationSeconds } ?: 0L) / 3600.0
+
+    // --- Screen Time (via subtraction) ---
+    val totalScreenOffSeconds = recentSessions.sumOf { it.durationSeconds }
+    val totalTimeInWeekSeconds = 7 * 24 * 3600
+    val avgDailyScreenOnHours = (totalTimeInWeekSeconds - totalScreenOffSeconds).coerceAtLeast(0) / 7.0 / 3600.0
+
+    // --- Avg Daily Locks ---
+    val avgDailyLocks = if (recentSessions.isNotEmpty()) {
+        recentSessions.size / 7.0
+    } else {
+        0.0
+    }
+
+    val todayStartMillis = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+    }.timeInMillis
+
+    val locksToday = sessions.count { it.startTimeMillis >= todayStartMillis }
+
+    // --- 3. UI TO DISPLAY THE STATS ---
+    Column(
+        modifier = Modifier.padding(bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // --- First Row of Stats ---
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StatCard(label = "Avg Sleep", value = "%.1f".format(weeklyAverageHours), unit = "hrs/day", modifier = Modifier.weight(1f))
+            StatCard(label = "Screen Time", value = "%.1f".format(avgDailyScreenOnHours), unit = "hrs/day", modifier = Modifier.weight(1f))
+            StatCard(label = "Unlocks Today", value = locksToday.toString(), unit = "", modifier = Modifier.weight(1f))
+        }
+        // --- Second Row of Stats ---
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StatCard(label = "Longest Sleep", value = "%.1f".format(longestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
+            StatCard(label = "Shortest Sleep", value = "%.1f".format(shortestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
+            StatCard(label = "Avg Unlocks", value = "%.0f".format(avgDailyLocks), unit = "/day", modifier = Modifier.weight(1f))
+
+        }
+    }
+}
+
+/**
+ * A reusable card for displaying a single statistic.
+ */
+@Composable
+private fun StatCard(label: String, value: String, unit: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(vertical = 12.dp, horizontal = 4.dp) // Adjusted padding
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.width(2.dp))
+                Text(
+                    text = unit,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 3.dp),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
