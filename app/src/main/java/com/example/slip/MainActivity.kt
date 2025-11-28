@@ -104,9 +104,8 @@ fun AppMainScreen(repository: SleepDataRepository) {
             composable(AppRoutes.SETTINGS) {
                 val settings by repository.userSettings.collectAsState(initial = UserSettings.default)
                 val sessions by repository.sessions.collectAsState(initial = emptyList())
-
-                // FIX: Use LocalActivity.current which is safer
-                val activity = LocalActivity.current as MainActivity
+                // We still need the coroutineScope for the lambda
+                val coroutineScope = rememberCoroutineScope()
 
                 SettingsScreen(
                     settings = settings,
@@ -116,8 +115,7 @@ fun AppMainScreen(repository: SleepDataRepository) {
                             repository.saveUserSettings(newSettings)
                         }
                     },
-                    navController = navController,
-                    onRequestPermissions = { activity.checkAndRequestPermissions() }
+                    navController = navController
                 )
             }
         }

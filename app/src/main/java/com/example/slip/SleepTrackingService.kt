@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
@@ -24,12 +25,15 @@ class SleepTrackingService : Service() {
     private var startTime: Long = 0
 
     companion object {
+        // This Flow will tell the UI if the service is active. It's public and static.
+        val isRunning = MutableStateFlow(false)
         const val NOTIFICATION_ID = 1
         const val CHANNEL_ID = "SleepTrackingServiceChannel"
     }
 
     override fun onCreate() {
         super.onCreate()
+        isRunning.value = true // Set to true when service is created
         Log.d("SleepTrackingService", "Service Created")
     }
 
@@ -57,6 +61,7 @@ class SleepTrackingService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning.value = false
         if (startTime > 0) {
             val endTime = System.currentTimeMillis()
             val seconds = (endTime - startTime) / 1000

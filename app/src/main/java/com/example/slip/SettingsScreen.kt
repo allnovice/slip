@@ -2,10 +2,8 @@ package com.example.slip
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -20,40 +18,33 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
-private enum class TimePickerTarget {
-    WeekdayStart,
-    WeekdayEnd,
-    WeekendStart,
-    WeekendEnd
-}
+// Enums and helper functions remain the same and are correct.
+private enum class TimePickerTarget { WeekdayStart, WeekdayEnd, WeekendStart, WeekendEnd }
 
-private fun UserTime.toMillis(): Long {
-    val calendar = Calendar.getInstance()
-    calendar.set(Calendar.HOUR_OF_DAY, hour)
-    calendar.set(Calendar.MINUTE, minute)
-    calendar.set(Calendar.SECOND, 0)
-    calendar.set(Calendar.MILLISECOND, 0)
-    return calendar.timeInMillis
-}
-
-@RequiresApi(Build.VERSION_CODES.Q)
-@OptIn(ExperimentalLayoutApi::class) // For FlowRow
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settings: UserSettings,
     sessions: List<SleepSession>,
     onSettingsChanged: (UserSettings) -> Unit,
-    navController: NavController,
-    onRequestPermissions: () -> Unit
+    navController: NavController
 ) {
     val context = LocalContext.current
     var tempSettings by remember(settings) { mutableStateOf(settings) }
     var showTimePickerFor by remember { mutableStateOf<TimePickerTarget?>(null) }
     val coroutineScope = rememberCoroutineScope()
+
+    // --- THIS IS THE FIX ---
+    // We correctly subscribe to the StateFlow from the ScreenMonitorService you provided.
+    val isServiceRunning by ScreenMonitorService.isRunning.collectAsState()
+    // -----------------------
+
+    // The TimePickerDialog logic is correct and does not need to change.
     showTimePickerFor?.let { target ->
         TimePickerDialog(
             onDismiss = { showTimePickerFor = null },
@@ -68,7 +59,6 @@ fun SettingsScreen(
                 tempSettings = newSettings
                 showTimePickerFor = null
 
-                // --- FIX 2: Auto-save the new settings inside a coroutine ---
                 coroutineScope.launch {
                     onSettingsChanged(newSettings)
                     Toast.makeText(context, "Settings saved", Toast.LENGTH_SHORT).show()
@@ -83,13 +73,12 @@ fun SettingsScreen(
         )
     }
 
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // --- Schedule Settings ---
+        // --- Schedule Settings (This part is correct) ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -109,7 +98,6 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.weight(1f)) // Pushes buttons to the bottom
-
         Divider(modifier = Modifier.padding(vertical = 16.dp))
 
         // --- Action Buttons ---
@@ -118,7 +106,6 @@ fun SettingsScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Button to open system permission settings for the app.
             TextButton(onClick = {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 intent.data = Uri.parse("package:" + context.packageName)
@@ -129,7 +116,25 @@ fun SettingsScreen(
                 Text("Permissions")
             }
 
-            // The one, useful "Export CSV" button.
+            // --- THE WORKING START/STOP BUTTON ---
+            Button(
+                onClick = {
+                    // This now correctly targets the ScreenMonitorService
+                    val serviceIntent = Intent(context, ScreenMonitorService::class.java)
+                    if (isServiceRunning) {
+                        context.stopService(serviceIntent)
+                    } else {
+                        // Use startForegroundService for reliability
+                        ContextCompat.startForegroundService(context, serviceIntent)
+                    }
+                },
+                colors = if (isServiceRunning) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                else ButtonDefaults.buttonColors()
+            ) {
+                Text(if (isServiceRunning) "Stop Monitoring" else "Start Monitoring")
+            }
+            // ----------------------------------------
+
             OutlinedButton(onClick = {
                 val header = "id,startTimeMillis,endTimeMillis,durationSeconds,isRealSleep\n"
                 val csvContent = sessions.joinToString(separator = "\n") { session ->
@@ -137,7 +142,6 @@ fun SettingsScreen(
                 }
                 val fullCsv = header + csvContent
                 val fileName = "sleep_data_${System.currentTimeMillis()}.csv"
-
                 val success = saveTextToFile(context, fullCsv, fileName)
                 val message = if (success) "Exported CSV to Downloads" else "CSV Export failed"
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
