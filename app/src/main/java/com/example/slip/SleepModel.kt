@@ -2,55 +2,49 @@ package com.example.slip
 
 import android.content.Context
 import org.tensorflow.lite.Interpreter
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import java.io.FileInputStream
 import java.util.Calendar
 
 interface SleepClassifier {
-    fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean
+    fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean
 }
 
 class HeuristicClassifier(private val settings: UserSettings) : SleepClassifier {
-    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
+    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean {
         return settings.isRealSleep(startTimeMillis, durationSeconds)
     }
 }
 
-class MLClassifier(private val context: Context) : SleepClassifier {
+class MLClassifier(
+    private val context: Context,
+    private val durationMean: Float,
+    private val durationStd: Float
+) : SleepClassifier {
     private var interpreter: Interpreter? = null
-
-    // Replace these with the values from your Colab: print(scaler.mean_, scaler.scale_)
-    private val DURATION_MEAN = 15000f  // Example value
-    private val DURATION_SCALE = 5000f  // Example value
 
     init {
         try {
-            interpreter = Interpreter(loadModelFile("sleep_model.tflite"))
+            // This is the "heavy" part that we want to avoid for short sessions
+            interpreter = Interpreter(loadModelFile("sleep_classifier_model.tflite"))
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
-        val model = interpreter ?: return false // Fallback if model failed to load
+    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean {
+        val model = interpreter ?: return false
 
-        // 1. Extract features exactly like your Colab
         val calendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis }
         val startHour = calendar.get(Calendar.HOUR_OF_DAY).toFloat()
         
         calendar.timeInMillis = startTimeMillis + (durationSeconds * 1000)
         val endHour = calendar.get(Calendar.HOUR_OF_DAY).toFloat()
 
-        // 2. Scale duration using your StandardScaler params
-        val scaledDuration = (durationSeconds.toFloat() - DURATION_MEAN) / DURATION_SCALE
+        val scaledDuration = (durationSeconds.toFloat() - durationMean) / durationStd
 
-        // 3. Prepare Input (3 features: start_hour, end_hour, duration_seconds)
-        val input = arrayOf(floatArrayOf(startHour, endHour, scaledDuration))
-        
-        // 4. Prepare Output (1 float for sigmoid probability)
+        val input = arrayOf(floatArrayOf(startHour, endHour, scaledDuration, targetHour.toFloat()))
         val output = Array(1) { FloatArray(1) }
 
         model.run(input, output)
@@ -70,18 +64,29 @@ class MLClassifier(private val context: Context) : SleepClassifier {
 class DynamicSleepClassifier(
     private val context: Context,
     private val settings: UserSettings,
-    private val sessionCount: Int
+    private val sessionCount: Int,
+    private val durationStats: Pair<Float, Float>
 ) : SleepClassifier {
     
     private val heuristic = HeuristicClassifier(settings)
-    private val mlModel = MLClassifier(context)
+    
+    // The ML model is only loaded if this property is accessed
+    private val mlModel by lazy { 
+        MLClassifier(context, durationStats.first, durationStats.second) 
+    }
 
-    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
-        // Use ML only if we have enough data (100 rows)
+    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean {
+        // --- PERFORMANCE OPTIMIZATION ---
+        // If the session is shorter than 1 hour, it's definitely not sleep.
+        // By returning early, we never access 'mlModel', so the TFLite model is NEVER loaded.
+        if (durationSeconds < 3600) {
+            return false
+        }
+
         return if (sessionCount >= 100) {
-            mlModel.isRealSleep(startTimeMillis, durationSeconds)
+            mlModel.isRealSleep(startTimeMillis, durationSeconds, targetHour)
         } else {
-            heuristic.isRealSleep(startTimeMillis, durationSeconds)
+            heuristic.isRealSleep(startTimeMillis, durationSeconds, targetHour)
         }
     }
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
@@ -34,11 +35,24 @@ class SleepDataRepository private constructor(
             UserTime.fromString(endWeekend)
         )
     }
+
+    val filterDuration: Flow<Float> = dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.FILTER_DURATION] ?: 0f
+    }
+
     private val _skippedSessionCount = MutableStateFlow(0)
     val skippedSessionCount = _skippedSessionCount.asStateFlow()
 
     suspend fun getSessionCount(): Int {
         return sleepSessionDao.getSessionCount()
+    }
+
+    // Fetch live stats for Universal Scaling
+    suspend fun getDurationStats(): Pair<Float, Float> {
+        val mean = sleepSessionDao.getDurationMean()?.toFloat() ?: 12900f // Fallback to a typical mean (e.g., 3.5h)
+        val variance = sleepSessionDao.getDurationVariance()?.toFloat() ?: (3600f * 3600f) // Fallback variance
+        val stdDev = kotlin.math.sqrt(variance).coerceAtLeast(1f)
+        return Pair(mean, stdDev)
     }
 
     fun addSleepSession(session: SleepSession) {
@@ -85,11 +99,18 @@ class SleepDataRepository private constructor(
         }
     }
 
+    suspend fun saveFilterDuration(duration: Float) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FILTER_DURATION] = duration
+        }
+    }
+
     private object PreferencesKeys {
         val WEEKDAY_SLEEP_START = stringPreferencesKey("weekday_sleep_start")
         val WEEKDAY_SLEEP_END = stringPreferencesKey("weekday_sleep_end")
         val WEEKEND_SLEEP_START = stringPreferencesKey("weekend_sleep_start")
         val WEEKEND_SLEEP_END = stringPreferencesKey("weekend_sleep_end")
+        val FILTER_DURATION = floatPreferencesKey("filter_duration")
     }
 
     companion object {

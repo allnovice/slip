@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.util.Calendar
 
 class SleepTrackingService : Service() {
 
@@ -60,29 +61,41 @@ class SleepTrackingService : Service() {
             val seconds = (endTime - startTime) / 1000
 
             // --- DYNAMIC CLASSIFICATION ---
-            // We fetch both settings and the current session count to decide which model to use.
             val classifierData = runBlocking(Dispatchers.IO) {
                 val settings = repository.userSettings.first()
                 val count = repository.getSessionCount()
-                Pair(settings, count)
+                val stats = repository.getDurationStats() 
+                Triple(settings, count, stats)
             }
+
+            // Determine current target bedtime hour
+            val startCal = Calendar.getInstance().apply { timeInMillis = startTime }
+            val dayOfWeek = startCal.get(Calendar.DAY_OF_WEEK)
+            val isWeekend = (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY)
+            val targetHour = if (isWeekend) classifierData.first.weekendSleepStart.hour else classifierData.first.weekdaySleepStart.hour
 
             val classifier = DynamicSleepClassifier(
                 context = applicationContext,
                 settings = classifierData.first,
-                sessionCount = classifierData.second
+                sessionCount = classifierData.second,
+                durationStats = classifierData.third
             )
 
-            // Use the dynamic classifier (Rules if < 100, ML if >= 100)
-            val isSleep: Boolean = classifier.isRealSleep(startTimeMillis = startTime, durationSeconds = seconds)
+            // Fix: Pass targetHour to isRealSleep
+            val isSleep: Boolean = classifier.isRealSleep(
+                startTimeMillis = startTime, 
+                durationSeconds = seconds, 
+                targetHour = targetHour
+            )
 
-            Log.d("SleepTrackingService", "Session of $seconds s. Count: ${classifierData.second}. ML active? ${classifierData.second >= 100}. Sleep? $isSleep.")
+            Log.d("SleepTrackingService", "Session of $seconds s. Count: ${classifierData.second}. Target: $targetHour. Sleep? $isSleep.")
 
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
                 durationSeconds = seconds,
-                isRealSleep = isSleep
+                isRealSleep = isSleep,
+                targetBedtimeHour = targetHour
             )
 
             repository.addSleepSession(session)

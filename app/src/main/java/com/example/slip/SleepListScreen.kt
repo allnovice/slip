@@ -34,6 +34,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,12 +67,19 @@ fun SleepSessionList(
     var sessionToEdit by remember { mutableStateOf<SleepSession?>(null) }
     var highlightedSessionId by remember { mutableStateOf<String?>(null) }
     
-    // --- FILTER STATE ---
+    // --- PERSISTENT FILTER STATE ---
     val minPossible = (sessions.minOfOrNull { it.durationSeconds } ?: 0L).toFloat()
-    val maxPossible = (sessions.maxOfOrNull { it.durationSeconds } ?: 3600L).toFloat()
-    var filterDurationSeconds by remember { mutableStateOf(0f) }
+    val maxPossible = (sessions.maxOfOrNull { it.durationSeconds } ?: 3600L).toFloat().coerceAtLeast(minPossible + 1f)
     
-    // Auto-update slider if data changes drastically
+    val savedFilterDuration by repository.filterDuration.collectAsState(initial = 0f)
+    var filterDurationSeconds by remember { mutableStateOf(0f) }
+
+    // Initialize/Sync from DataStore
+    LaunchedEffect(savedFilterDuration) {
+        filterDurationSeconds = savedFilterDuration.coerceIn(minPossible, maxPossible)
+    }
+    
+    // Auto-update slider if data changes drastically (e.g. all sessions deleted)
     LaunchedEffect(sessions.size) {
         if (filterDurationSeconds < minPossible) filterDurationSeconds = minPossible
     }
@@ -165,6 +173,11 @@ fun SleepSessionList(
                                 Slider(
                                     value = filterDurationSeconds,
                                     onValueChange = { filterDurationSeconds = it },
+                                    onValueChangeFinished = {
+                                        scope.launch {
+                                            repository.saveFilterDuration(filterDurationSeconds)
+                                        }
+                                    },
                                     valueRange = minPossible..maxPossible,
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -179,6 +192,7 @@ fun SleepSessionList(
                                     // Reset filter if clicked session is filtered out
                                     if (session.durationSeconds < filterDurationSeconds) {
                                         filterDurationSeconds = 0f
+                                        scope.launch { repository.saveFilterDuration(0f) }
                                     }
                                     expandedStateMap[dateHeader] = true
                                     highlightedSessionId = session.id

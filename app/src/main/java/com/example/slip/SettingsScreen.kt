@@ -4,15 +4,16 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -20,10 +21,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.Calendar
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Locale
 
-// Enums and helper functions remain the same and are correct.
 private enum class TimePickerTarget { WeekdayStart, WeekdayEnd, WeekendStart, WeekendEnd }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -32,6 +35,7 @@ fun SettingsScreen(
     settings: UserSettings,
     sessions: List<SleepSession>,
     onSettingsChanged: (UserSettings) -> Unit,
+    onAddSession: (SleepSession) -> Unit,
     navController: NavController
 ) {
     val context = LocalContext.current
@@ -39,12 +43,23 @@ fun SettingsScreen(
     var showTimePickerFor by remember { mutableStateOf<TimePickerTarget?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    // --- THIS IS THE FIX ---
-    // We correctly subscribe to the StateFlow from the ScreenMonitorService you provided.
     val isServiceRunning by ScreenMonitorService.isRunning.collectAsState()
-    // -----------------------
 
-    // The TimePickerDialog logic is correct and does not need to change.
+    val csvPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            coroutineScope.launch {
+                val success = importCsv(context, it, onAddSession)
+                if (success) {
+                    Toast.makeText(context, "Data imported successfully!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Failed to import CSV", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     showTimePickerFor?.let { target ->
         TimePickerDialog(
             onDismiss = { showTimePickerFor = null },
@@ -78,7 +93,6 @@ fun SettingsScreen(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // --- Schedule Settings (This part is correct) ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -97,10 +111,9 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.weight(1f)) // Pushes buttons to the bottom
+        Spacer(Modifier.weight(1f))
         Divider(modifier = Modifier.padding(vertical = 16.dp))
 
-        // --- Action Buttons ---
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -116,15 +129,12 @@ fun SettingsScreen(
                 Text("Permissions")
             }
 
-            // --- THE WORKING START/STOP BUTTON ---
             Button(
                 onClick = {
-                    // This now correctly targets the ScreenMonitorService
                     val serviceIntent = Intent(context, ScreenMonitorService::class.java)
                     if (isServiceRunning) {
                         context.stopService(serviceIntent)
                     } else {
-                        // Use startForegroundService for reliability
                         ContextCompat.startForegroundService(context, serviceIntent)
                     }
                 },
@@ -133,12 +143,19 @@ fun SettingsScreen(
             ) {
                 Text(if (isServiceRunning) "Stop Monitoring" else "Start Monitoring")
             }
-            // ----------------------------------------
 
             OutlinedButton(onClick = {
-                val header = "id,startTimeMillis,endTimeMillis,durationSeconds,isRealSleep\n"
+                csvPickerLauncher.launch("text/*")
+            }) {
+                Icon(Icons.Default.Upload, contentDescription = "Import CSV", modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Import CSV")
+            }
+
+            OutlinedButton(onClick = {
+                val header = "id,startTimeMillis,endTimeMillis,durationSeconds,isRealSleep,targetBedtimeHour\n"
                 val csvContent = sessions.joinToString(separator = "\n") { session ->
-                    "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.isRealSleep}"
+                    "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.isRealSleep},${session.targetBedtimeHour}"
                 }
                 val fullCsv = header + csvContent
                 val fileName = "sleep_data_${System.currentTimeMillis()}.csv"
@@ -151,6 +168,50 @@ fun SettingsScreen(
                 Text("Export CSV")
             }
         }
+    }
+}
+
+private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd: (SleepSession) -> Unit): Boolean = withContext(Dispatchers.IO) {
+    try {
+        val dateFormat = SimpleDateFormat("MM/dd/yy h:mm a", Locale.US)
+        
+        context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            val reader = inputStream.bufferedReader()
+            val lines = reader.readLines()
+            if (lines.size <= 1) return@withContext false
+
+            lines.drop(1).forEach { line ->
+                val parts = line.split(",")
+                if (parts.size >= 5) {
+                    val startMillis = try {
+                        parts[1].toLong()
+                    } catch (e: NumberFormatException) {
+                        dateFormat.parse(parts[1])?.time ?: System.currentTimeMillis()
+                    }
+                    
+                    val endMillis = try {
+                        parts[2].toLong()
+                    } catch (e: NumberFormatException) {
+                        dateFormat.parse(parts[2])?.time ?: System.currentTimeMillis()
+                    }
+
+                    val targetHour = if (parts.size >= 6) parts[5].toInt() else 22
+                    val session = SleepSession(
+                        id = parts[0],
+                        startTimeMillis = startMillis,
+                        endTimeMillis = endMillis,
+                        durationSeconds = parts[3].toLong(),
+                        isRealSleep = parts[4].toBooleanStrictOrNull(),
+                        targetBedtimeHour = targetHour
+                    )
+                    onAdd(session)
+                }
+            }
+            true
+        } ?: false
+    } catch (e: Exception) {
+        e.printStackTrace()
+        false
     }
 }
 
