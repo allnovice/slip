@@ -10,53 +10,69 @@ import java.io.FileInputStream
 import java.util.Calendar
 
 interface SleepClassifier {
-    fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean
+    fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, stats: Pair<Float, Float>? = null): Boolean
 }
 
 class HeuristicClassifier(private val settings: UserSettings) : SleepClassifier {
-    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
+    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, stats: Pair<Float, Float>?): Boolean {
         return settings.isRealSleep(startTimeMillis, durationSeconds)
     }
 }
 
-class MLClassifier(private val context: Context) : SleepClassifier {
+class MLClassifier(private val context: Context, private val settings: UserSettings) : SleepClassifier {
     private var interpreter: Interpreter? = null
 
-    // Replace these with the values from your Colab: print(scaler.mean_, scaler.scale_)
-    private val DURATION_MEAN = 15000f  // Example value
-    private val DURATION_SCALE = 5000f  // Example value
+    // --- UNIVERSAL DEFAULTS ---
+    // These are your training values. We use them as a "starting point" 
+    // before the app has enough of the user's own data to calculate their personal stats.
+    private val DEFAULT_MEAN = 1290.4127f 
+    private val DEFAULT_SCALE = 3688.5928f 
 
     init {
         try {
-            interpreter = Interpreter(loadModelFile("sleep_model.tflite"))
+            interpreter = Interpreter(loadModelFile("sleep_classifier_model.tflite"))
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
-        val model = interpreter ?: return false // Fallback if model failed to load
+    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, stats: Pair<Float, Float>?): Boolean {
+        val model = interpreter ?: return false 
 
-        // 1. Extract features exactly like your Colab
+        // 1. Convert Start/End to decimal hours (e.g. 10:30 PM = 22.5)
         val calendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis }
-        val startHour = calendar.get(Calendar.HOUR_OF_DAY).toFloat()
+        val startMins = calendar.get(Calendar.HOUR_OF_DAY) + calendar.get(Calendar.MINUTE) / 60.0f
         
-        calendar.timeInMillis = startTimeMillis + (durationSeconds * 1000)
-        val endHour = calendar.get(Calendar.HOUR_OF_DAY).toFloat()
+        val endCalendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis + (durationSeconds * 1000) }
+        val endMins = endCalendar.get(Calendar.HOUR_OF_DAY) + endCalendar.get(Calendar.MINUTE) / 60.0f
 
-        // 2. Scale duration using your StandardScaler params
-        val scaledDuration = (durationSeconds.toFloat() - DURATION_MEAN) / DURATION_SCALE
-
-        // 3. Prepare Input (3 features: start_hour, end_hour, duration_seconds)
-        val input = arrayOf(floatArrayOf(startHour, endHour, scaledDuration))
+        val isWeekend = calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY || calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
+        val targetBedtimeHour = (if (isWeekend) settings.weekendSleepStart else settings.weekdaySleepStart).hour.toFloat()
         
-        // 4. Prepare Output (1 float for sigmoid probability)
+        // 2. Calculate offsets relative to Target Bedtime [-12, 12]
+        // This handles the "Universal" time logic from your Colab perfectly
+        var startOffset = (startMins - targetBedtimeHour) % 24
+        if (startOffset < 0) startOffset += 24
+        if (startOffset > 12) startOffset -= 24
+
+        var endOffset = (endMins - targetBedtimeHour) % 24
+        if (endOffset < 0) endOffset += 24
+        if (endOffset > 12) endOffset -= 24
+
+        // 3. DYNAMIC SCALING
+        // This is the "Universal" duration logic. We use the stats calculated 
+        // in the Repository from the user's local database.
+        val mean = stats?.first ?: DEFAULT_MEAN
+        val stdDev = stats?.second ?: DEFAULT_SCALE
+        val scaledDuration = (durationSeconds.toFloat() - mean) / stdDev
+
+        // 4. Run Inference [start_offset, end_offset, scaled_duration]
+        val input = arrayOf(floatArrayOf(startOffset, endOffset, scaledDuration))
         val output = Array(1) { FloatArray(1) }
 
         model.run(input, output)
-
-        val probability = output[0][0]
-        return probability > 0.5f
+        
+        return output[0][0] > 0.5f
     }
 
     private fun loadModelFile(modelPath: String): MappedByteBuffer {
@@ -70,16 +86,17 @@ class MLClassifier(private val context: Context) : SleepClassifier {
 class DynamicSleepClassifier(
     private val context: Context,
     private val settings: UserSettings,
-    private val sessionCount: Int
+    private val sessionCount: Int,
+    private val stats: Pair<Float, Float>?
 ) : SleepClassifier {
     
     private val heuristic = HeuristicClassifier(settings)
-    private val mlModel = MLClassifier(context)
+    private val mlModel = MLClassifier(context, settings)
 
-    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
-        // Use ML only if we have enough data (100 rows)
+    override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, statsArg: Pair<Float, Float>?): Boolean {
+        // Use ML only after we have a good baseline of data
         return if (sessionCount >= 100) {
-            mlModel.isRealSleep(startTimeMillis, durationSeconds)
+            mlModel.isRealSleep(startTimeMillis, durationSeconds, stats)
         } else {
             heuristic.isRealSleep(startTimeMillis, durationSeconds)
         }

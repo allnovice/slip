@@ -21,9 +21,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 
-// Enums and helper functions remain the same and are correct.
 private enum class TimePickerTarget { WeekdayStart, WeekdayEnd, WeekendStart, WeekendEnd }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -39,12 +40,8 @@ fun SettingsScreen(
     var showTimePickerFor by remember { mutableStateOf<TimePickerTarget?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    // --- THIS IS THE FIX ---
-    // We correctly subscribe to the StateFlow from the ScreenMonitorService you provided.
-    val isServiceRunning by ScreenMonitorService.isRunning.collectAsState()
-    // -----------------------
+    val isServiceRunning by SleepTrackingService.isRunning.collectAsState()
 
-    // The TimePickerDialog logic is correct and does not need to change.
     showTimePickerFor?.let { target ->
         TimePickerDialog(
             onDismiss = { showTimePickerFor = null },
@@ -78,7 +75,6 @@ fun SettingsScreen(
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // --- Schedule Settings (This part is correct) ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -97,10 +93,9 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.weight(1f)) // Pushes buttons to the bottom
+        Spacer(Modifier.weight(1f))
         Divider(modifier = Modifier.padding(vertical = 16.dp))
 
-        // --- Action Buttons ---
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -116,15 +111,12 @@ fun SettingsScreen(
                 Text("Permissions")
             }
 
-            // --- THE WORKING START/STOP BUTTON ---
             Button(
                 onClick = {
-                    // This now correctly targets the ScreenMonitorService
-                    val serviceIntent = Intent(context, ScreenMonitorService::class.java)
+                    val serviceIntent = Intent(context, SleepTrackingService::class.java)
                     if (isServiceRunning) {
                         context.stopService(serviceIntent)
                     } else {
-                        // Use startForegroundService for reliability
                         ContextCompat.startForegroundService(context, serviceIntent)
                     }
                 },
@@ -133,17 +125,26 @@ fun SettingsScreen(
             ) {
                 Text(if (isServiceRunning) "Stop Monitoring" else "Start Monitoring")
             }
-            // ----------------------------------------
 
             OutlinedButton(onClick = {
-                val header = "id,startTimeMillis,endTimeMillis,durationSeconds,isRealSleep\n"
+                val dateFormat = SimpleDateFormat("MM/dd/yy h:mm a", Locale.US)
+                val header = "id,startTimeMillis,endTimeMillis,durationSeconds,isRealSleep,targetBedtimeHour\n"
+                
                 val csvContent = sessions.joinToString(separator = "\n") { session ->
-                    "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.isRealSleep}"
+                    val cal = Calendar.getInstance().apply { timeInMillis = session.startTimeMillis }
+                    val isWeekend = cal.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY || cal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
+                    val targetHour = if (isWeekend) tempSettings.weekendSleepStart.hour else tempSettings.weekdaySleepStart.hour
+                    
+                    val startStr = dateFormat.format(session.startTimeMillis)
+                    val endStr = dateFormat.format(session.endTimeMillis)
+                    
+                    "${session.id},$startStr,$endStr,${session.durationSeconds},${session.isRealSleep},$targetHour"
                 }
+                
                 val fullCsv = header + csvContent
-                val fileName = "sleep_data_${System.currentTimeMillis()}.csv"
+                val fileName = "sleep_data_universal_${System.currentTimeMillis()}.csv"
                 val success = saveTextToFile(context, fullCsv, fileName)
-                val message = if (success) "Exported CSV to Downloads" else "CSV Export failed"
+                val message = if (success) "Exported Universal CSV to Downloads" else "CSV Export failed"
                 Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             }) {
                 Icon(Icons.Default.Download, contentDescription = "Export CSV", modifier = Modifier.size(18.dp))

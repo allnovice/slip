@@ -41,6 +41,13 @@ class SleepDataRepository private constructor(
         return sleepSessionDao.getSessionCount()
     }
 
+    suspend fun getDurationStats(): Pair<Float, Float> {
+        val mean = sleepSessionDao.getDurationMean()?.toFloat() ?: 1290f // Fallback to your training mean
+        val variance = sleepSessionDao.getDurationVariance()?.toFloat() ?: (3688f * 3688f)
+        val stdDev = kotlin.math.sqrt(variance).coerceAtLeast(1f)
+        return Pair(mean, stdDev)
+    }
+
     fun addSleepSession(session: SleepSession) {
         CoroutineScope(Dispatchers.IO).launch {
             sleepSessionDao.insert(session)

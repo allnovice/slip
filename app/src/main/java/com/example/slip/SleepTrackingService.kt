@@ -60,21 +60,21 @@ class SleepTrackingService : Service() {
             val seconds = (endTime - startTime) / 1000
 
             // --- DYNAMIC CLASSIFICATION ---
-            // We fetch both settings and the current session count to decide which model to use.
             val classifierData = runBlocking(Dispatchers.IO) {
                 val settings = repository.userSettings.first()
                 val count = repository.getSessionCount()
-                Pair(settings, count)
+                val stats = repository.getDurationStats() // Get Dynamic Stats for Universal Scaling
+                Triple(settings, count, stats)
             }
 
             val classifier = DynamicSleepClassifier(
                 context = applicationContext,
                 settings = classifierData.first,
-                sessionCount = classifierData.second
+                sessionCount = classifierData.second,
+                stats = classifierData.third
             )
 
-            // Use the dynamic classifier (Rules if < 100, ML if >= 100)
-            val isSleep: Boolean = classifier.isRealSleep(startTimeMillis = startTime, durationSeconds = seconds)
+            val isSleep: Boolean = classifier.isRealSleep(startTimeMillis = startTime, durationSeconds = seconds, statsArg = classifierData.third)
 
             Log.d("SleepTrackingService", "Session of $seconds s. Count: ${classifierData.second}. ML active? ${classifierData.second >= 100}. Sleep? $isSleep.")
 
