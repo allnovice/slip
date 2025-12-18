@@ -1,13 +1,14 @@
 package com.example.slip
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -16,40 +17,31 @@ import java.util.Calendar
 @Composable
 fun StatsSection(
     sessions: List<SleepSession>,
-    repository: SleepDataRepository // This is kept for potential future use, but not strictly needed for these new stats.
+    repository: SleepDataRepository
 ) {
-    // --- 1. SETUP ---
-    // Don't show the stats section if there's no data at all.
     if (sessions.isEmpty()) {
         return
     }
-    // Get the start of the 7-day window.
+    
+    val isMLActive = sessions.size >= 100
     val sevenDaysAgoMillis = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
 
-    // --- 2. CALCULATIONS ---
-
-    // A) Filter for sessions in the last 7 days.
     val recentSessions = sessions.filter { it.startTimeMillis >= sevenDaysAgoMillis }
-    // B) Filter for "real sleep" sessions in the last 7 days.
     val recentRealSleepSessions = recentSessions.filter { it.isRealSleep == true }
 
-    // --- Avg Sleep ---
     val weeklyAverageHours = if (recentRealSleepSessions.isNotEmpty()) {
         (recentRealSleepSessions.sumOf { it.durationSeconds } / 7.0) / 3600.0
     } else {
         0.0
     }
 
-    // --- Longest & Shortest Sleep ---
     val longestSleepHours = (recentRealSleepSessions.maxOfOrNull { it.durationSeconds } ?: 0L) / 3600.0
     val shortestSleepHours = (recentRealSleepSessions.minOfOrNull { it.durationSeconds } ?: 0L) / 3600.0
 
-    // --- Screen Time (via subtraction) ---
     val totalScreenOffSeconds = recentSessions.sumOf { it.durationSeconds }
     val totalTimeInWeekSeconds = 7 * 24 * 3600
     val avgDailyScreenOnHours = (totalTimeInWeekSeconds - totalScreenOffSeconds).coerceAtLeast(0) / 7.0 / 3600.0
 
-    // --- Avg Daily Locks ---
     val avgDailyLocks = if (recentSessions.isNotEmpty()) {
         recentSessions.size / 7.0
     } else {
@@ -64,12 +56,35 @@ fun StatsSection(
 
     val locksToday = sessions.count { it.startTimeMillis >= todayStartMillis }
 
-    // --- 3. UI TO DISPLAY THE STATS ---
     Column(
         modifier = Modifier.padding(bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // --- First Row of Stats ---
+        // --- ML STATUS BADGE ---
+        Surface(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            shape = CircleShape,
+            color = if (isMLActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isMLActive) Color(0xFF4CAF50) else Color.Gray)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (isMLActive) "ML Mode: ACTIVE" else "ML Mode: COLLECTING DATA (${sessions.size}/100)",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -78,7 +93,6 @@ fun StatsSection(
             StatCard(label = "Screen Time", value = "%.1f".format(avgDailyScreenOnHours), unit = "hrs/day", modifier = Modifier.weight(1f))
             StatCard(label = "Unlocks Today", value = locksToday.toString(), unit = "", modifier = Modifier.weight(1f))
         }
-        // --- Second Row of Stats ---
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -86,14 +100,10 @@ fun StatsSection(
             StatCard(label = "Longest Sleep", value = "%.1f".format(longestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
             StatCard(label = "Shortest Sleep", value = "%.1f".format(shortestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
             StatCard(label = "Avg Unlocks", value = "%.0f".format(avgDailyLocks), unit = "/day", modifier = Modifier.weight(1f))
-
         }
     }
 }
 
-/**
- * A reusable card for displaying a single statistic.
- */
 @Composable
 private fun StatCard(label: String, value: String, unit: String, modifier: Modifier = Modifier) {
     Card(
@@ -102,7 +112,7 @@ private fun StatCard(label: String, value: String, unit: String, modifier: Modif
     ) {
         Column(
             modifier = Modifier
-                .padding(vertical = 12.dp, horizontal = 4.dp) // Adjusted padding
+                .padding(vertical = 12.dp, horizontal = 4.dp)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {

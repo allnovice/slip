@@ -16,16 +16,11 @@ import kotlinx.coroutines.runBlocking
 
 class SleepTrackingService : Service() {
 
-    // --- THIS IS THE FIX ---
-    // Change this line to use the new Singleton getInstance() method.
-    // This ensures the service uses the EXACT SAME repository instance as the MainActivity.
     private val repository: SleepDataRepository by lazy { SleepDataRepository.getInstance(applicationContext) }
-    // -----------------------
 
     private var startTime: Long = 0
 
     companion object {
-        // This Flow will tell the UI if the service is active. It's public and static.
         val isRunning = MutableStateFlow(false)
         const val NOTIFICATION_ID = 1
         const val CHANNEL_ID = "SleepTrackingServiceChannel"
@@ -33,7 +28,7 @@ class SleepTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        isRunning.value = true // Set to true when service is created
+        isRunning.value = true
         Log.d("SleepTrackingService", "Service Created")
     }
 
@@ -47,13 +42,11 @@ class SleepTrackingService : Service() {
                 .setContentTitle("Sleep Tracking Active")
                 .setContentText("Your sleep session is being recorded.")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setPriority(NotificationCompat.PRIORITY_MIN) // <-- Set to MIN
+                .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
 
             startForeground(NOTIFICATION_ID, notification)
         } else {
-            // If startTime is not 0, it means the service is already running.
-            // We ignore this duplicate start command.
             Log.d("SleepTrackingService", "Service already running. Ignoring duplicate start command.")
         }
 
@@ -66,29 +59,33 @@ class SleepTrackingService : Service() {
             val endTime = System.currentTimeMillis()
             val seconds = (endTime - startTime) / 1000
 
-            // --- THIS IS THE NEW, CORRECT LOGIC ---
-            // We log EVERY session and tag it as TRUE or FALSE. No more skipping or nulls.
-
-            // Get user settings to auto-tag the session.
-            val userSettings = runBlocking(Dispatchers.IO) {
-                repository.userSettings.first()
+            // --- DYNAMIC CLASSIFICATION ---
+            // We fetch both settings and the current session count to decide which model to use.
+            val classifierData = runBlocking(Dispatchers.IO) {
+                val settings = repository.userSettings.first()
+                val count = repository.getSessionCount()
+                Pair(settings, count)
             }
 
-            // We use the schedule to determine if the session was likely sleep (true) or not (false).
-            // This runs for EVERY session, regardless of its length.
-            val isSleep: Boolean = userSettings.isRealSleep(startTimeMillis = startTime, durationSeconds = seconds)
+            val classifier = DynamicSleepClassifier(
+                context = applicationContext,
+                settings = classifierData.first,
+                sessionCount = classifierData.second
+            )
 
-            Log.d("SleepTrackingService", "Session of $seconds s. Auto-tagged as sleep? $isSleep. SAVING.")
+            // Use the dynamic classifier (Rules if < 100, ML if >= 100)
+            val isSleep: Boolean = classifier.isRealSleep(startTimeMillis = startTime, durationSeconds = seconds)
+
+            Log.d("SleepTrackingService", "Session of $seconds s. Count: ${classifierData.second}. ML active? ${classifierData.second >= 100}. Sleep? $isSleep.")
 
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
                 durationSeconds = seconds,
-                isRealSleep = isSleep // The label will always be true or false.
+                isRealSleep = isSleep
             )
 
             repository.addSleepSession(session)
-            // ------------------------------------
         }
         startTime = 0L
         super.onDestroy()

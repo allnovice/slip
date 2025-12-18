@@ -1,6 +1,7 @@
 package com.example.slip
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -18,10 +19,17 @@ import kotlin.math.max
 import kotlin.math.min
 
 // A data class to hold the processed sleep blocks for drawing
-private data class SleepBlock(val startOffsetPercent: Float, val heightPercent: Float)
+private data class SleepBlock(
+    val startOffsetPercent: Float,
+    val heightPercent: Float,
+    val session: SleepSession
+)
 
 @Composable
-fun SleepGanttChart(sessions: List<SleepSession>) {
+fun SleepGanttChart(
+    sessions: List<SleepSession>,
+    onSessionClick: (SleepSession) -> Unit = {}
+) {
     // --- 1. Prepare the data ---
     // The data for each day will now be a list of SleepBlocks
     val weeklyData: List<Pair<String, List<SleepBlock>>> = (6 downTo 0).map { daysAgo ->
@@ -56,7 +64,7 @@ fun SleepGanttChart(sessions: List<SleepSession>) {
                     val startOffsetPercent = startOffsetMillis / (24 * 3600 * 1000f)
                     val heightPercent = durationMillis / (24 * 3600 * 1000f)
 
-                    SleepBlock(startOffsetPercent, heightPercent)
+                    SleepBlock(startOffsetPercent, heightPercent, session)
                 }
             }
         Pair(dayLabel, sleepBlocksForDay)
@@ -94,7 +102,9 @@ fun SleepGanttChart(sessions: List<SleepSession>) {
                                 .padding(top = (120 * block.startOffsetPercent).dp)
                                 // Set the height of the block based on its duration
                                 .height((120 * block.heightPercent).dp)
+                                .clip(RoundedCornerShape(2.dp))
                                 .background(MaterialTheme.colorScheme.primary)
+                                .clickable { onSessionClick(block.session) }
                         )
                     }
                 }
