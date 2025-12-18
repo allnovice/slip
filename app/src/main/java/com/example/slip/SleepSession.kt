@@ -1,26 +1,17 @@
-// In app/src/main/java/com/example/slip/SleepSession.kt
 package com.example.slip
 
-// --- 1. Add the necessary Room imports ---
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-// -----------------------------------------
-
 import java.util.UUID
 
-// --- 2. Add the @Entity annotation ---
-// This tells Room to create a table named "sleep_sessions" for this class.
 @Entity(tableName = "sleep_sessions")
 data class SleepSession(
-    // --- 3. Add the @PrimaryKey annotation ---
-    // This marks the 'id' field as the unique identifier for each row.
     @PrimaryKey
-    @ColumnInfo(name = "id") // Explicitly name the column
+    @ColumnInfo(name = "id")
     val id: String = UUID.randomUUID().toString(),
-    // ------------------------------------------
 
-    @ColumnInfo(name = "start_time_millis") // Use snake_case for column names (good practice)
+    @ColumnInfo(name = "start_time_millis")
     val startTimeMillis: Long,
 
     @ColumnInfo(name = "end_time_millis")
@@ -30,5 +21,9 @@ data class SleepSession(
     val durationSeconds: Long,
 
     @ColumnInfo(name = "is_real_sleep")
-    var isRealSleep: Boolean? = null // This property holds the user's label
+    var isRealSleep: Boolean? = null,
+
+    // New: The user's scheduled bedtime hour when this was recorded (0-23)
+    @ColumnInfo(name = "target_bedtime_hour")
+    val targetBedtimeHour: Int = 22 
 )

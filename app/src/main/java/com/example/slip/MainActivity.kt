@@ -1,12 +1,10 @@
 package com.example.slip
 
-// FIX: Import LocalActivity
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
@@ -53,7 +51,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // FIX: Make the function public so it can be called from the composable
     fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf<String>()
 
@@ -79,7 +76,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppMainScreen(repository: SleepDataRepository) {
     val navController = rememberNavController()
-    val coroutineScope = rememberCoroutineScope()
 
     Scaffold { innerPadding ->
         NavHost(
@@ -104,7 +100,6 @@ fun AppMainScreen(repository: SleepDataRepository) {
             composable(AppRoutes.SETTINGS) {
                 val settings by repository.userSettings.collectAsState(initial = UserSettings.default)
                 val sessions by repository.sessions.collectAsState(initial = emptyList())
-                // We still need the coroutineScope for the lambda
                 val coroutineScope = rememberCoroutineScope()
 
                 SettingsScreen(
@@ -114,6 +109,9 @@ fun AppMainScreen(repository: SleepDataRepository) {
                         coroutineScope.launch {
                             repository.saveUserSettings(newSettings)
                         }
+                    },
+                    onAddSession = { session ->
+                        repository.addSleepSession(session)
                     },
                     navController = navController
                 )
