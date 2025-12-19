@@ -66,6 +66,7 @@ fun SleepSessionList(
     var showAddDialog by remember { mutableStateOf(false) }
     var sessionToEdit by remember { mutableStateOf<SleepSession?>(null) }
     var highlightedSessionId by remember { mutableStateOf<String?>(null) }
+    var highlightedDateHeader by remember { mutableStateOf<String?>(null) }
     
     // --- PERSISTENT FILTER STATE ---
     val minPossible = (sessions.minOfOrNull { it.durationSeconds } ?: 0L).toFloat()
@@ -79,7 +80,7 @@ fun SleepSessionList(
         filterDurationSeconds = savedFilterDuration.coerceIn(minPossible, maxPossible)
     }
     
-    // Auto-update slider if data changes drastically (e.g. all sessions deleted)
+    // Auto-update slider if data changes drastically
     LaunchedEffect(sessions.size) {
         if (filterDurationSeconds < minPossible) filterDurationSeconds = minPossible
     }
@@ -114,10 +115,11 @@ fun SleepSessionList(
 
     val expandedStateMap = remember { mutableStateMapOf<String, Boolean>().withDefault { true } }
 
-    LaunchedEffect(highlightedSessionId) {
-        if (highlightedSessionId != null) {
+    LaunchedEffect(highlightedSessionId, highlightedDateHeader) {
+        if (highlightedSessionId != null || highlightedDateHeader != null) {
             delay(3000)
             highlightedSessionId = null
+            highlightedDateHeader = null
         }
     }
 
@@ -185,11 +187,10 @@ fun SleepSessionList(
                         }
 
                         item { 
-                            SleepGanttChart(
+                            VisualizationPager(
                                 sessions = sessions,
                                 onSessionClick = { session ->
                                     val dateHeader = headerDateFormatter.format(session.startTimeMillis)
-                                    // Reset filter if clicked session is filtered out
                                     if (session.durationSeconds < filterDurationSeconds) {
                                         filterDurationSeconds = 0f
                                         scope.launch { repository.saveFilterDuration(0f) }
@@ -198,7 +199,7 @@ fun SleepSessionList(
                                     highlightedSessionId = session.id
                                     
                                     scope.launch {
-                                        var targetIndex = 4 // Offset for Stats, Slider, Chart, Divider
+                                        var targetIndex = 4
                                         for (entry in groupedSessions) {
                                             if (entry.key == dateHeader) {
                                                 val sessionIdx = entry.value.indexOfFirst { it.id == session.id }
@@ -214,6 +215,27 @@ fun SleepSessionList(
                                             }
                                         }
                                     }
+                                },
+                                onDayClick = { dayStartMillis ->
+                                    val dateHeader = headerDateFormatter.format(dayStartMillis)
+                                    filterDurationSeconds = 0f
+                                    scope.launch { repository.saveFilterDuration(0f) }
+                                    expandedStateMap[dateHeader] = true
+                                    highlightedDateHeader = dateHeader
+                                    
+                                    scope.launch {
+                                        var targetIndex = 4
+                                        for (entry in groupedSessions) {
+                                            if (entry.key == dateHeader) {
+                                                listState.animateScrollToItem(targetIndex)
+                                                break
+                                            }
+                                            targetIndex += 1
+                                            if (expandedStateMap.getValue(entry.key)) {
+                                                targetIndex += entry.value.size
+                                            }
+                                        }
+                                    }
                                 }
                             ) 
                         }
@@ -221,10 +243,11 @@ fun SleepSessionList(
 
                         groupedSessions.forEach { (dateHeader, sessionsForDate) ->
                             stickyHeader {
+                                val isHeaderHighlighted = highlightedDateHeader == dateHeader
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.surface)
+                                        .background(if (isHeaderHighlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
                                         .padding(horizontal = 16.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {

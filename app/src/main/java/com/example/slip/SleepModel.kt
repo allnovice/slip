@@ -27,7 +27,7 @@ class MLClassifier(
     init {
         try {
             // This is the "heavy" part that we want to avoid for short sessions
-            interpreter = Interpreter(loadModelFile("sleep_classifier_model.tflite"))
+            interpreter = Interpreter(loadModelFile("sleep_classifier_modelold.tflite"))
         } catch (e: Exception) {
             e.printStackTrace()
         }
