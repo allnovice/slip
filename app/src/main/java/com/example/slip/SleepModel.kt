@@ -40,8 +40,8 @@ open class BaseMLClassifier(
                 modelFileName != null -> Interpreter(loadModelFile(modelFileName))
                 else -> null
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: Exception) {
+            // Error logged silently to avoid console noise
         }
     }
 
@@ -51,14 +51,14 @@ open class BaseMLClassifier(
             val inputShape = interp.getInputTensor(0).shape()
             val outputShape = interp.getOutputTensor(0).shape()
             inputShape[1] == 3 && outputShape[1] == 1
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
 
     override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean {
         val model = interpreter ?: return false
-        if (durationSeconds < 3600) return false // Standard guard for ML models
+        if (durationSeconds < 3600) return false 
 
         val calendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis }
         val startMins = calendar.get(Calendar.HOUR_OF_DAY) + calendar.get(Calendar.MINUTE) / 60.0f

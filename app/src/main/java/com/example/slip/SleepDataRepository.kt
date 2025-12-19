@@ -8,8 +8,6 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -58,12 +56,7 @@ class SleepDataRepository private constructor(
         preferences[PreferencesKeys.IS_MONITORING_ENABLED] ?: false
     }
 
-    private val _skippedSessionCount = MutableStateFlow(0)
-    val skippedSessionCount = _skippedSessionCount.asStateFlow()
-
-    suspend fun getSessionCount(): Int {
-        return sleepSessionDao.getSessionCount()
-    }
+    suspend fun getSessionCount(): Int = sleepSessionDao.getSessionCount()
 
     suspend fun getDurationStats(): Pair<Float, Float> {
         val mean = sleepSessionDao.getDurationMean()?.toFloat() ?: 4475.4f
@@ -178,7 +171,7 @@ class SleepDataRepository private constructor(
                     preferences[PreferencesKeys.USER_ML_MODEL_PATH] = path
                 }
                 path
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 null
             }
         }

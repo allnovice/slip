@@ -26,7 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.navigation.NavController
+import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,7 +42,6 @@ fun SettingsScreen(
     sessions: List<SleepSession>,
     onSettingsChanged: (UserSettings) -> Unit,
     onAddSession: (SleepSession) -> Unit,
-    navController: NavController,
     repository: SleepDataRepository
 ) {
     val context = LocalContext.current
@@ -135,15 +134,15 @@ fun SettingsScreen(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Weekday", style = MaterialTheme.typography.titleMedium)
-                ClickableTimeRow("Bedtime:", tempSettings.weekdaySleepStart) { showTimePickerFor = TimePickerTarget.WeekdayStart }
+                ClickableTimeRow(tempSettings.weekdaySleepStart) { showTimePickerFor = TimePickerTarget.WeekdayStart }
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text("Weekend", style = MaterialTheme.typography.titleMedium)
-                ClickableTimeRow("Bedtime:", tempSettings.weekendSleepStart) { showTimePickerFor = TimePickerTarget.WeekendStart }
+                ClickableTimeRow(tempSettings.weekendSleepStart) { showTimePickerFor = TimePickerTarget.WeekendStart }
             }
         }
 
-        Divider(modifier = Modifier.padding(vertical = 24.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("AI Classification", style = MaterialTheme.typography.titleLarge)
@@ -229,7 +228,7 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(24.dp))
-        Divider()
+        HorizontalDivider()
 
         FlowRow(
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
@@ -238,7 +237,7 @@ fun SettingsScreen(
         ) {
             TextButton(onClick = {
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:" + context.packageName)
+                intent.data = ("package:" + context.packageName).toUri()
                 context.startActivity(intent)
             }) {
                 Icon(Icons.Default.Warning, null, modifier = Modifier.size(18.dp))
@@ -306,6 +305,18 @@ fun SettingsScreen(
     }
 }
 
+@Composable
+private fun ClickableTimeRow(time: UserTime, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Bedtime:", style = MaterialTheme.typography.bodyMedium)
+        Text(time.toString(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+    }
+}
+
 private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd: (SleepSession) -> Unit): Boolean = withContext(Dispatchers.IO) {
     try {
         val dateFormat = SimpleDateFormat("MM/dd/yy h:mm a", Locale.US)
@@ -315,8 +326,8 @@ private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd:
             lines.drop(1).forEach { line ->
                 val parts = line.split(",")
                 if (parts.size >= 5) {
-                    val startMillis = try { parts[1].toLong() } catch (e: Exception) { dateFormat.parse(parts[1])?.time ?: 0L }
-                    val endMillis = try { parts[2].toLong() } catch (e: Exception) { dateFormat.parse(parts[2])?.time ?: 0L }
+                    val startMillis = try { parts[1].toLong() } catch (_: Exception) { dateFormat.parse(parts[1])?.time ?: 0L }
+                    val endMillis = try { parts[2].toLong() } catch (_: Exception) { dateFormat.parse(parts[2])?.time ?: 0L }
                     val session = SleepSession(
                         id = parts[0],
                         startTimeMillis = startMillis,
@@ -330,19 +341,7 @@ private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd:
             }
             true
         } ?: false
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         false
-    }
-}
-
-@Composable
-private fun ClickableTimeRow(label: String, time: UserTime, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(time.toString(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
     }
 }

@@ -36,18 +36,15 @@ class MainActivity : ComponentActivity() {
     private val repository by lazy { SleepDataRepository.getInstance(this) }
 
     private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            val allGranted = permissions.entries.all { it.value }
-            if (allGranted) {
-                // Permissions granted, check if we should start monitoring
-                autoStartMonitoring()
-            }
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+            // Permissions handled, attempt auto-start
+            autoStartMonitoring()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkAndRequestPermissions()
-        autoStartMonitoring() // Attempt auto-start on load
+        autoStartMonitoring()
         
         setContent {
             SlipTheme {
@@ -66,7 +63,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun checkAndRequestPermissions() {
+    private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf<String>()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -116,20 +113,19 @@ fun AppMainScreen(repository: SleepDataRepository) {
             composable(AppRoutes.SETTINGS) {
                 val settings by repository.userSettings.collectAsState(initial = UserSettings.default)
                 val sessions by repository.sessions.collectAsState(initial = emptyList())
-                val coroutineScope = rememberCoroutineScope()
+                val scope = rememberCoroutineScope()
 
                 SettingsScreen(
                     settings = settings,
                     sessions = sessions,
                     onSettingsChanged = { newSettings ->
-                        coroutineScope.launch {
+                        scope.launch {
                             repository.saveUserSettings(newSettings)
                         }
                     },
                     onAddSession = { session ->
                         repository.addSleepSession(session)
                     },
-                    navController = navController,
                     repository = repository
                 )
             }
