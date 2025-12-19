@@ -43,50 +43,51 @@ data class UserTime(val hour: Int, val minute: Int) {
 // The main settings object with default values
 data class UserSettings(
     val weekdaySleepStart: UserTime,
-    val weekdaySleepEnd: UserTime,
-    val weekendSleepStart: UserTime,
-    val weekendSleepEnd: UserTime
+    val weekendSleepStart: UserTime
 ) {
     companion object {
         val default = UserSettings(
             weekdaySleepStart = UserTime(22, 0),  // 10:00 PM
-            weekdaySleepEnd = UserTime(6, 0),    // 6:00 AM
-            weekendSleepStart = UserTime(23, 0),  // 11:00 PM
-            weekendSleepEnd = UserTime(7, 0)     // 7:00 AM
+            weekendSleepStart = UserTime(23, 0)   // 11:00 PM
         )
     }
 }
 
 /**
- * Checks if the current time is within the monitoring window (1hr before bedtime to wake-up).
+ * Checks if the current time is within the monitoring window.
+ * Window = 1hr before bedtime until 12 hours later (Automatic Window).
  */
 fun UserSettings.isInsideMonitoringWindow(currentTimeMillis: Long): Boolean {
     val calendar = Calendar.getInstance().apply { timeInMillis = currentTimeMillis }
     val isWeekend = (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY || calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
     
     val targetBedtime = if (isWeekend) weekendSleepStart else weekdaySleepStart
-    val targetWakeup = if (isWeekend) weekendSleepEnd else weekdaySleepEnd
 
     val currentMins = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
     val bedtimeMins = targetBedtime.hour * 60 + targetBedtime.minute
+    
+    // Start window 1 hour before bedtime
     val startMonitoringMins = (bedtimeMins - 60 + 1440) % 1440
-    val wakeupMins = targetWakeup.hour * 60 + targetWakeup.minute
+    // End window 12 hours after bedtime
+    val endMonitoringMins = (bedtimeMins + 720) % 1440
 
-    return if (startMonitoringMins < wakeupMins) {
-        // Window is within one day (e.g., 9 PM to 11 PM - rare but possible)
-        currentMins in startMonitoringMins..wakeupMins
+    return if (startMonitoringMins < endMonitoringMins) {
+        currentMins in startMonitoringMins..endMonitoringMins
     } else {
-        // Window crosses midnight (e.g., 9 PM to 6 AM)
-        currentMins >= startMonitoringMins || currentMins <= wakeupMins
+        currentMins >= startMonitoringMins || currentMins <= endMonitoringMins
     }
 }
 
 /**
- * The original heuristic model (Rule-based).
+ * The "Dumb Model" logic.
+ * Decides if a session should be tagged as "Real Sleep" (✅) by default.
  */
 fun UserSettings.isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
-    // Rule 1: The duration must be longer than 1 hour to be considered sleep.
-    if (durationSeconds < 3600) return false
+    // --- UPDATED RULE ---
+    // For the Dumb Model to auto-tag as "Sleep", it must be longer than 4 hours (14400s).
+    // Sessions between 1 and 4 hours will be SAVED to the database (so ML can see them)
+    // but they will be tagged as "False" (❌) initially to avoid nap/movie false positives.
+    if (durationSeconds < 14400) return false
 
     // Rule 2: The start time should be near the user's typical bedtime.
     val startCalendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis }
