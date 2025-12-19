@@ -1,6 +1,7 @@
 package com.example.slip
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -16,15 +17,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.slip.ui.theme.SlipTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 object AppRoutes {
     const val SLEEP_LIST = "sleep_list"
     const val SETTINGS = "settings"
+    const val MODEL_LAB = "model_lab"
 }
 
 class MainActivity : ComponentActivity() {
@@ -35,18 +39,29 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             val allGranted = permissions.entries.all { it.value }
             if (allGranted) {
-                // Permissions have been granted.
-            } else {
-                // Inform the user that background features might not work correctly.
+                // Permissions granted, check if we should start monitoring
+                autoStartMonitoring()
             }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkAndRequestPermissions()
+        autoStartMonitoring() // Attempt auto-start on load
+        
         setContent {
             SlipTheme {
                 AppMainScreen(repository = repository)
+            }
+        }
+    }
+
+    private fun autoStartMonitoring() {
+        lifecycleScope.launch {
+            val isEnabled = repository.isMonitoringEnabled.first()
+            if (isEnabled) {
+                val serviceIntent = Intent(this@MainActivity, ScreenMonitorService::class.java)
+                ContextCompat.startForegroundService(this@MainActivity, serviceIntent)
             }
         }
     }
@@ -94,7 +109,8 @@ fun AppMainScreen(repository: SleepDataRepository) {
                     },
                     onAdd = { newSession -> repository.addSleepSession(newSession) },
                     onLabel = { session, isRealSleep -> repository.labelSession(session, isRealSleep) },
-                    onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) }
+                    onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) },
+                    onNavigateToModelLab = { navController.navigate(AppRoutes.MODEL_LAB) }
                 )
             }
             composable(AppRoutes.SETTINGS) {
@@ -113,7 +129,16 @@ fun AppMainScreen(repository: SleepDataRepository) {
                     onAddSession = { session ->
                         repository.addSleepSession(session)
                     },
-                    navController = navController
+                    navController = navController,
+                    repository = repository
+                )
+            }
+            composable(AppRoutes.MODEL_LAB) {
+                val sessions by repository.sessions.collectAsState(initial = emptyList())
+                ModelLabScreen(
+                    sessions = sessions,
+                    repository = repository,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
         }

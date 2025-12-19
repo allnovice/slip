@@ -3,7 +3,7 @@ package com.example.slip
 import android.content.Context
 import androidx.room.*
 
-@Database(entities = [SleepSession::class], version = 1, exportSchema = false)
+@Database(entities = [SleepSession::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 

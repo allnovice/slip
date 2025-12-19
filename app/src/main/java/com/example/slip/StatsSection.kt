@@ -1,6 +1,7 @@
 package com.example.slip
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -17,7 +18,8 @@ import java.util.Calendar
 @Composable
 fun StatsSection(
     sessions: List<SleepSession>,
-    repository: SleepDataRepository
+    repository: SleepDataRepository,
+    onStatusClick: () -> Unit
 ) {
     if (sessions.isEmpty()) {
         return
@@ -62,7 +64,9 @@ fun StatsSection(
     ) {
         // --- ML STATUS BADGE ---
         Surface(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .clickable(onClick = onStatusClick),
             shape = CircleShape,
             color = if (isMLActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
         ) {
@@ -78,7 +82,7 @@ fun StatsSection(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (isMLActive) "ML Mode: ACTIVE" else "ML Mode: COLLECTING DATA (${sessions.size}/100)",
+                    text = if (isMLActive) "ML Mode: ACTIVE (Tap for Lab)" else "ML Mode: COLLECTING DATA (${sessions.size}/100)",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )

@@ -9,28 +9,38 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 
 class SleepStateReceiver : BroadcastReceiver() {
 
-    @RequiresApi(Build.VERSION_CODES.Q)
     override fun onReceive(context: Context, intent: Intent) {
+        // --- PERSISTENCE LOGIC ---
+        // If the phone just rebooted, we check if monitoring should be active
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+            Log.d("SleepStateReceiver", "📱 Phone Rebooted. Checking monitoring state...")
+            val repository = SleepDataRepository.getInstance(context.applicationContext)
+            val shouldMonitor = runBlocking { repository.isMonitoringEnabled.first() }
+            
+            if (shouldMonitor) {
+                Log.d("SleepStateReceiver", "✅ Monitoring was enabled. Restarting ScreenMonitorService.")
+                val serviceIntent = Intent(context, ScreenMonitorService::class.java)
+                ContextCompat.startForegroundService(context, serviceIntent)
+            }
+            return
+        }
+
+        // --- NORMAL TRACKING LOGIC ---
         when (intent.action) {
             Intent.ACTION_SCREEN_OFF -> {
                 Log.d("SleepStateReceiver", "Screen OFF, attempting to start service.")
-
-                // --- THIS IS THE FIX ---
-                // Before starting the tracking service, check for the required permission.
                 val permission = Manifest.permission.ACTIVITY_RECOGNITION
                 if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
-                    // If permission is granted, start the service as normal.
                     val serviceIntent = Intent(context, SleepTrackingService::class.java)
                     ContextCompat.startForegroundService(context, serviceIntent)
                 } else {
-                    // If permission is NOT granted, we cannot start the service.
-                    // Log an error so the developer can see what happened.
-                    Log.e("SleepStateReceiver", "Cannot start SleepTrackingService: ACTIVITY_RECOGNITION permission not granted.")
+                    Log.e("SleepStateReceiver", "Cannot start SleepTrackingService: Permission not granted.")
                 }
-                // -----------------------
             }
             Intent.ACTION_USER_PRESENT -> {
                 Log.d("SleepStateReceiver", "Screen ON, stopping service.")

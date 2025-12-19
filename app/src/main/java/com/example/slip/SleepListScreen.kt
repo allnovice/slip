@@ -61,6 +61,7 @@ fun SleepSessionList(
     onAdd: (SleepSession) -> Unit,
     onLabel: (session: SleepSession, isRealSleep: Boolean) -> Unit,
     onNavigateToSettings: () -> Unit,
+    onNavigateToModelLab: () -> Unit,
     repository: SleepDataRepository,
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
@@ -159,7 +160,13 @@ fun SleepSessionList(
                         contentPadding = PaddingValues(bottom = 80.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        item { StatsSection(sessions = sessions, repository = repository) }
+                        item { 
+                            StatsSection(
+                                sessions = sessions, 
+                                repository = repository,
+                                onStatusClick = onNavigateToModelLab 
+                            ) 
+                        }
                         
                         // --- FILTER SLIDER SECTION ---
                         item {

@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -18,7 +20,7 @@ class ScreenMonitorService : Service() {
     companion object {
         private val _isRunning = MutableStateFlow(false)
         val isRunning = _isRunning.asStateFlow()
-        const val MONITOR_NOTIFICATION_ID = 2 // Use a different ID from the other service
+        const val MONITOR_NOTIFICATION_ID = 2
         const val MONITOR_CHANNEL_ID = "ScreenMonitorServiceChannel"
     }
 
@@ -30,41 +32,42 @@ class ScreenMonitorService : Service() {
             addAction(Intent.ACTION_USER_PRESENT)
         }
         registerReceiver(sleepStateReceiver, intentFilter)
-        Log.d("ScreenMonitorService", "Service created and SleepStateReceiver registered.")
+        Log.d("ScreenMonitorService", "✅ SERVICE CREATED: Receiver registered for SCREEN_OFF/USER_PRESENT")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d("ScreenMonitorService", "🚀 ON_START_COMMAND called")
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, MONITOR_CHANNEL_ID)
             .setContentTitle("Sleep Monitoring Active")
-            .setContentText("The app is listening for screen lock events.")
+            .setContentText("Listening for screen lock events...")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setPriority(NotificationCompat.PRIORITY_LOW) // A lower priority notification
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        startForeground(MONITOR_NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(MONITOR_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(MONITOR_NOTIFICATION_ID, notification)
+        }
 
-        // If the service is killed, restart it.
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // When the service is destroyed, unregister the receiver to clean up.
         _isRunning.value = false
         unregisterReceiver(sleepStateReceiver)
-        Log.d("ScreenMonitorService", "Service destroyed and SleepStateReceiver unregistered.")
+        Log.d("ScreenMonitorService", "🛑 SERVICE DESTROYED: Receiver unregistered")
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
-    }
+    override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotificationChannel() {
         val serviceChannel = NotificationChannel(
             MONITOR_CHANNEL_ID,
             "Screen Monitoring Service Channel",
-            NotificationManager.IMPORTANCE_LOW // Use low importance for this persistent notification
+            NotificationManager.IMPORTANCE_LOW
         )
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(serviceChannel)

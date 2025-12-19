@@ -8,10 +8,12 @@ interface SleepSessionDao {
     @Query("SELECT * FROM sleep_sessions ORDER BY start_time_millis DESC")
     fun getSessions(): Flow<List<SleepSession>>
 
+    @Query("SELECT * FROM sleep_sessions")
+    suspend fun getAllSessionsList(): List<SleepSession>
+
     @Query("SELECT COUNT(*) FROM sleep_sessions")
     suspend fun getSessionCount(): Int
 
-    // Calculate mean and variance of ALL durations to match the StandardScaler in Colab
     @Query("SELECT AVG(duration_seconds) FROM sleep_sessions")
     suspend fun getDurationMean(): Double?
 

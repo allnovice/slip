@@ -23,7 +23,15 @@ data class SleepSession(
     @ColumnInfo(name = "is_real_sleep")
     var isRealSleep: Boolean? = null,
 
-    // New: The user's scheduled bedtime hour when this was recorded (0-23)
     @ColumnInfo(name = "target_bedtime_hour")
-    val targetBedtimeHour: Int = 22 
+    val targetBedtimeHour: Int = 22,
+
+    // --- MODEL LAB PREDICTIONS ---
+    // We removed pred_dumb as is_real_sleep serves as the baseline truth (Rules + Edits)
+    
+    @ColumnInfo(name = "pred_default_ml")
+    val predDefaultMl: Boolean = false,
+
+    @ColumnInfo(name = "pred_custom_ml")
+    val predCustomMl: Boolean = false
 )
