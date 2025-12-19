@@ -26,8 +26,6 @@ open class BaseMLClassifier(
     private val durationStd: Float
 ) : SleepClassifier {
     private var interpreter: Interpreter? = null
-    
-    // Publicly accessible feature count for UI feedback
     var inputFeatureCount: Int = 0
         private set
 
@@ -61,7 +59,6 @@ open class BaseMLClassifier(
 
         val calendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis }
         val startMins = calendar.get(Calendar.HOUR_OF_DAY) + calendar.get(Calendar.MINUTE) / 60.0f
-        
         val endCalendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis + (durationSeconds * 1000) }
         val endMins = endCalendar.get(Calendar.HOUR_OF_DAY) + endCalendar.get(Calendar.MINUTE) / 60.0f
 
@@ -82,7 +79,6 @@ open class BaseMLClassifier(
 
         val input = arrayOf(features)
         val output = Array(1) { FloatArray(1) }
-
         model.run(input, output)
         return output[0][0] > 0.5f
     }
@@ -108,14 +104,24 @@ class ModelLabEngine(
     private val settings: UserSettings,
     private val systemStats: Pair<Float, Float>,
     private val customPath: String?,
-    private val customStats: Pair<Float, Float>
+    private val customStats: Pair<Float, Float>,
+    private val sessionCount: Int
 ) {
     fun runAll(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): LabResult {
         val dumb = HeuristicClassifier(settings).isRealSleep(startTimeMillis, durationSeconds, targetHour)
-        val defaultMl = DefaultMLClassifier(context, systemStats.first, systemStats.second).isRealSleep(startTimeMillis, durationSeconds, targetHour)
-        val customMl = if (customPath != null) {
-            CustomMLClassifier(context, customPath, customStats.first, customStats.second).isRealSleep(startTimeMillis, durationSeconds, targetHour)
+        
+        // System ML only runs after 100 sessions
+        val defaultMl = if (sessionCount >= 100) {
+            DefaultMLClassifier(context, systemStats.first, systemStats.second)
+                .isRealSleep(startTimeMillis, durationSeconds, targetHour)
         } else false
+            
+        // Custom ML runs IF it exists (assuming user knows what they're doing)
+        val customMl = if (customPath != null) {
+            CustomMLClassifier(context, customPath, customStats.first, customStats.second)
+                .isRealSleep(startTimeMillis, durationSeconds, targetHour)
+        } else false
+
         return LabResult(dumb, defaultMl, customMl)
     }
 }

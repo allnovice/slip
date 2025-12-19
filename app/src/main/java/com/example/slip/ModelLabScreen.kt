@@ -8,7 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -31,18 +31,17 @@ fun ModelLabScreen(
 ) {
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
     val hasCustomModel = userMlPath != null
+    val totalHistory = sessions.size
+    val isSystemMlActive = totalHistory >= 100
 
     val labeledSessions = sessions.filter { it.isRealSleep != null }
-    val totalSessions = labeledSessions.size
+    val totalLabeled = labeledSessions.size
 
-    fun calculateAccuracy(predicate: (SleepSession) -> Boolean): Int {
-        if (totalSessions == 0) return 0
+    fun calculateAccuracy(predicate: (SleepSession) -> Boolean): String {
+        if (totalLabeled == 0) return "0%"
         val matches = labeledSessions.count { predicate(it) == it.isRealSleep }
-        return (matches * 100) / totalSessions
+        return "${(matches * 100) / totalLabeled}%"
     }
-
-    val defaultMlAccuracy = calculateAccuracy { it.predDefaultMl }
-    val customMlAccuracy = calculateAccuracy { it.predCustomMl }
 
     Scaffold(
         topBar = {
@@ -64,17 +63,23 @@ fun ModelLabScreen(
             item {
                 Text("ML Performance Accuracy", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "How often AI models match the final sleep labels (Rules + Your edits).",
+                    "System ML activates at 100 sessions. Custom ML activates immediately on upload.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
                 Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AccuracyCard("System ML", "$defaultMlAccuracy%", Modifier.weight(1f))
+                    AccuracyCard(
+                        "System ML", 
+                        if (isSystemMlActive) calculateAccuracy { it.predDefaultMl } else "$totalHistory/100",
+                        Modifier.weight(1f),
+                        isActive = isSystemMlActive
+                    )
                     AccuracyCard(
                         "Custom ML", 
-                        if (hasCustomModel) "$customMlAccuracy%" else "N/A", 
-                        Modifier.weight(1f)
+                        if (hasCustomModel) calculateAccuracy { it.predCustomMl } else "N/A", 
+                        Modifier.weight(1f),
+                        isActive = hasCustomModel
                     )
                 }
             }
@@ -82,32 +87,38 @@ fun ModelLabScreen(
             item {
                 Text("Prediction Log", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
-                TableHeader(hasCustomModel)
+                TableHeader(isSystemMlActive, hasCustomModel)
             }
 
             items(sessions) { session ->
-                ComparisonRow(session, hasCustomModel)
-                Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ComparisonRow(session, isSystemMlActive, hasCustomModel)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
         }
     }
 }
 
 @Composable
-private fun AccuracyCard(label: String, value: String, modifier: Modifier) {
-    Card(modifier = modifier) {
+private fun AccuracyCard(label: String, value: String, modifier: Modifier, isActive: Boolean) {
+    Card(
+        modifier = modifier,
+        colors = if (isActive) CardDefaults.cardColors() else CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
         Column(
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(label, style = MaterialTheme.typography.labelSmall)
             Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            if (!isActive && label == "System ML") {
+                Text("Collecting data", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            }
         }
     }
 }
 
 @Composable
-private fun TableHeader(hasCustomModel: Boolean) {
+private fun TableHeader(showSystem: Boolean, showCustom: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -116,16 +127,14 @@ private fun TableHeader(hasCustomModel: Boolean) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text("Time", modifier = Modifier.weight(1.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Text("System AI", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        if (hasCustomModel) {
-            Text("Custom AI", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        }
-        Text("FINAL TRUTH", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (showSystem) Text("System", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (showCustom) Text("Custom", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text("TRUTH", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
 @Composable
-private fun ComparisonRow(session: SleepSession, hasCustomModel: Boolean) {
+private fun ComparisonRow(session: SleepSession, showSystem: Boolean, showCustom: Boolean) {
     val timeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
     
     Row(
@@ -137,10 +146,8 @@ private fun ComparisonRow(session: SleepSession, hasCustomModel: Boolean) {
             modifier = Modifier.weight(1.5f),
             fontSize = 10.sp
         )
-        PredictionIcon(session.predDefaultMl, Modifier.weight(1f))
-        if (hasCustomModel) {
-            PredictionIcon(session.predCustomMl, Modifier.weight(1f))
-        }
+        if (showSystem) PredictionIcon(session.predDefaultMl, Modifier.weight(1f))
+        if (showCustom) PredictionIcon(session.predCustomMl, Modifier.weight(1f))
         PredictionIcon(session.isRealSleep ?: false, Modifier.weight(1f), isTruth = true)
     }
 }
