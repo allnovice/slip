@@ -27,9 +27,6 @@ data class UserTime(val hour: Int, val minute: Int) {
     }
 
     companion object {
-        /**
-         * Creates a UserTime object from a "HH:mm" string.
-         */
         fun fromString(timeString: String): UserTime {
             return try {
                 val parts = timeString.split(":")
@@ -43,52 +40,65 @@ data class UserTime(val hour: Int, val minute: Int) {
     }
 }
 
-
 // The main settings object with default values
 data class UserSettings(
     val weekdaySleepStart: UserTime,
-    val weekendSleepStart: UserTime
+    val weekdaySleepEnd: UserTime,
+    val weekendSleepStart: UserTime,
+    val weekendSleepEnd: UserTime
 ) {
     companion object {
-        /**
-         * Provides a default set of settings for when the app first starts.
-         */
         val default = UserSettings(
             weekdaySleepStart = UserTime(22, 0),  // 10:00 PM
-            weekendSleepStart = UserTime(23, 0)   // 11:00 PM
+            weekdaySleepEnd = UserTime(6, 0),    // 6:00 AM
+            weekendSleepStart = UserTime(23, 0),  // 11:00 PM
+            weekendSleepEnd = UserTime(7, 0)     // 7:00 AM
         )
     }
 }
 
 /**
- * The "Dumb Model" or Heuristic.
- * This function checks if a given session qualifies as "real sleep" based on the user's settings. */
+ * Checks if the current time is within the monitoring window (1hr before bedtime to wake-up).
+ */
+fun UserSettings.isInsideMonitoringWindow(currentTimeMillis: Long): Boolean {
+    val calendar = Calendar.getInstance().apply { timeInMillis = currentTimeMillis }
+    val isWeekend = (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY || calendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
+    
+    val targetBedtime = if (isWeekend) weekendSleepStart else weekdaySleepStart
+    val targetWakeup = if (isWeekend) weekendSleepEnd else weekdaySleepEnd
+
+    val currentMins = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+    val bedtimeMins = targetBedtime.hour * 60 + targetBedtime.minute
+    val startMonitoringMins = (bedtimeMins - 60 + 1440) % 1440
+    val wakeupMins = targetWakeup.hour * 60 + targetWakeup.minute
+
+    return if (startMonitoringMins < wakeupMins) {
+        // Window is within one day (e.g., 9 PM to 11 PM - rare but possible)
+        currentMins in startMonitoringMins..wakeupMins
+    } else {
+        // Window crosses midnight (e.g., 9 PM to 6 AM)
+        currentMins >= startMonitoringMins || currentMins <= wakeupMins
+    }
+}
+
+/**
+ * The original heuristic model (Rule-based).
+ */
 fun UserSettings.isRealSleep(startTimeMillis: Long, durationSeconds: Long): Boolean {
     // Rule 1: The duration must be longer than 1 hour to be considered sleep.
-    val isLongEnough = durationSeconds > 3600
-
-    if (!isLongEnough) {
-        return false
-    }
+    if (durationSeconds < 3600) return false
 
     // Rule 2: The start time should be near the user's typical bedtime.
-    val startCalendar =
-        Calendar.getInstance().apply { timeInMillis = startTimeMillis }
-    val dayOfWeek = startCalendar.get(Calendar.DAY_OF_WEEK)
-    val startHour = startCalendar.get(Calendar.HOUR_OF_DAY)
-
-    val isWeekend = (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY)
-
-    // Determine which bedtime to check against based on the day.
+    val startCalendar = Calendar.getInstance().apply { timeInMillis = startTimeMillis }
+    val isWeekend = (startCalendar.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY || startCalendar.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY)
     val targetBedtime = if (isWeekend) this.weekendSleepStart else this.weekdaySleepStart
+    
+    val startHour = startCalendar.get(Calendar.HOUR_OF_DAY)
     val bedtimeHour = targetBedtime.hour
 
-    // Check if the start hour is within a 2-hour window of the target bedtime.
-    val isNearBedtime = if (bedtimeHour >= 22) { // For late bedtimes like 10, 11 PM
-        (startHour >= bedtimeHour - 2) || (startHour <= (bedtimeHour + 2) % 24)
-    } else { // For early bedtimes like 12, 1 AM
-        (startHour >= (bedtimeHour - 2 + 24) % 24) || (startHour <= bedtimeHour + 2)
-    }
-
-    return isNearBedtime
+    // Circular check: within 2 hours of bedtime
+    var diff = Math.abs(startHour - bedtimeHour)
+    if (diff > 12) diff = 24 - diff
+    
+    return diff <= 2
 }

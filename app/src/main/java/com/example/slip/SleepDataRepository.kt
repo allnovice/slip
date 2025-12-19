@@ -25,10 +25,14 @@ class SleepDataRepository private constructor(
 
     val userSettings: Flow<UserSettings> = dataStore.data.map { preferences ->
         val startWeekday = preferences[PreferencesKeys.WEEKDAY_SLEEP_START] ?: "22:00"
+        val endWeekday = preferences[PreferencesKeys.WEEKDAY_SLEEP_END] ?: "06:00"
         val startWeekend = preferences[PreferencesKeys.WEEKEND_SLEEP_START] ?: "23:00"
+        val endWeekend = preferences[PreferencesKeys.WEEKEND_SLEEP_END] ?: "07:00"
         UserSettings(
             UserTime.fromString(startWeekday),
-            UserTime.fromString(startWeekend)
+            UserTime.fromString(endWeekday),
+            UserTime.fromString(startWeekend),
+            UserTime.fromString(endWeekend)
         )
     }
 
@@ -99,7 +103,9 @@ class SleepDataRepository private constructor(
     suspend fun saveUserSettings(newSettings: UserSettings) {
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.WEEKDAY_SLEEP_START] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekdaySleepStart.hour, newSettings.weekdaySleepStart.minute)
+            preferences[PreferencesKeys.WEEKDAY_SLEEP_END] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekdaySleepEnd.hour, newSettings.weekdaySleepEnd.minute)
             preferences[PreferencesKeys.WEEKEND_SLEEP_START] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekendSleepStart.hour, newSettings.weekendSleepStart.minute)
+            preferences[PreferencesKeys.WEEKEND_SLEEP_END] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekendSleepEnd.hour, newSettings.weekendSleepEnd.minute)
         }
     }
 
@@ -179,7 +185,9 @@ class SleepDataRepository private constructor(
 
     private object PreferencesKeys {
         val WEEKDAY_SLEEP_START = stringPreferencesKey("weekday_sleep_start")
+        val WEEKDAY_SLEEP_END = stringPreferencesKey("weekday_sleep_end")
         val WEEKEND_SLEEP_START = stringPreferencesKey("weekend_sleep_start")
+        val WEEKEND_SLEEP_END = stringPreferencesKey("weekend_sleep_end")
         val FILTER_DURATION = floatPreferencesKey("filter_duration")
         val USE_USER_ML_MODEL = booleanPreferencesKey("use_user_ml_model")
         val USER_ML_MODEL_PATH = stringPreferencesKey("user_ml_model_path")

@@ -12,18 +12,12 @@ interface SleepClassifier {
     fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean
 }
 
-/**
- * Model 1: The "Dumb" Model (Heuristic Rules)
- */
 class HeuristicClassifier(private val settings: UserSettings) : SleepClassifier {
     override fun isRealSleep(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): Boolean {
         return settings.isRealSleep(startTimeMillis, durationSeconds)
     }
 }
 
-/**
- * Base class for TFLite models to avoid code duplication
- */
 open class BaseMLClassifier(
     private val context: Context,
     private val modelFileName: String?,
@@ -32,6 +26,10 @@ open class BaseMLClassifier(
     private val durationStd: Float
 ) : SleepClassifier {
     private var interpreter: Interpreter? = null
+    
+    // Publicly accessible feature count for UI feedback
+    var inputFeatureCount: Int = 0
+        private set
 
     init {
         try {
@@ -40,9 +38,10 @@ open class BaseMLClassifier(
                 modelFileName != null -> Interpreter(loadModelFile(modelFileName))
                 else -> null
             }
-        } catch (_: Exception) {
-            // Error logged silently to avoid console noise
-        }
+            interpreter?.let {
+                inputFeatureCount = it.getInputTensor(0).shape()[1]
+            }
+        } catch (_: Exception) { }
     }
 
     fun isValid(): Boolean {
@@ -50,7 +49,7 @@ open class BaseMLClassifier(
             val interp = interpreter ?: return false
             val inputShape = interp.getInputTensor(0).shape()
             val outputShape = interp.getOutputTensor(0).shape()
-            inputShape[1] == 3 && outputShape[1] == 1
+            (inputShape[1] == 2 || inputShape[1] == 3) && outputShape[1] == 1
         } catch (_: Exception) {
             false
         }
@@ -74,8 +73,14 @@ open class BaseMLClassifier(
         if (endOffset < 0) endOffset += 24
         if (endOffset > 12) endOffset -= 24
 
-        val scaledDuration = (durationSeconds.toFloat() - durationMean) / durationStd
-        val input = arrayOf(floatArrayOf(startOffset, endOffset, scaledDuration))
+        val features = if (inputFeatureCount == 2) {
+            floatArrayOf(startOffset, endOffset)
+        } else {
+            val scaledDuration = (durationSeconds.toFloat() - durationMean) / durationStd
+            floatArrayOf(startOffset, endOffset, scaledDuration)
+        }
+
+        val input = arrayOf(features)
         val output = Array(1) { FloatArray(1) }
 
         model.run(input, output)
@@ -90,21 +95,12 @@ open class BaseMLClassifier(
     }
 }
 
-/**
- * Model 2: The Default System ML Model
- */
 class DefaultMLClassifier(context: Context, mean: Float, std: Float) : 
     BaseMLClassifier(context, "sleep_classifier_model.tflite", null, mean, std)
 
-/**
- * Model 3: The Custom User ML Model
- */
 class CustomMLClassifier(context: Context, path: String, mean: Float, std: Float) : 
     BaseMLClassifier(context, null, path, mean, std)
 
-/**
- * The Brain that runs all models for the "Model Lab" comparison
- */
 data class LabResult(val dumb: Boolean, val defaultMl: Boolean, val customMl: Boolean)
 
 class ModelLabEngine(
@@ -116,15 +112,10 @@ class ModelLabEngine(
 ) {
     fun runAll(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): LabResult {
         val dumb = HeuristicClassifier(settings).isRealSleep(startTimeMillis, durationSeconds, targetHour)
-        
-        val defaultMl = DefaultMLClassifier(context, systemStats.first, systemStats.second)
-            .isRealSleep(startTimeMillis, durationSeconds, targetHour)
-            
+        val defaultMl = DefaultMLClassifier(context, systemStats.first, systemStats.second).isRealSleep(startTimeMillis, durationSeconds, targetHour)
         val customMl = if (customPath != null) {
-            CustomMLClassifier(context, customPath, customStats.first, customStats.second)
-                .isRealSleep(startTimeMillis, durationSeconds, targetHour)
+            CustomMLClassifier(context, customPath, customStats.first, customStats.second).isRealSleep(startTimeMillis, durationSeconds, targetHour)
         } else false
-
         return LabResult(dumb, defaultMl, customMl)
     }
 }

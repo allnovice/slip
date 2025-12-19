@@ -21,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,6 +60,15 @@ fun SettingsScreen(
     var meanText by remember(userMlMean) { mutableStateOf(userMlMean.toString()) }
     var stdText by remember(userMlStd) { mutableStateOf(userMlStd.toString()) }
 
+    var customFeatureCount by remember { mutableIntStateOf(0) }
+    
+    LaunchedEffect(userMlPath) {
+        userMlPath?.let { path ->
+            val classifier = CustomMLClassifier(context, path, userMlMean, userMlStd)
+            customFeatureCount = classifier.inputFeatureCount
+        }
+    }
+
     val csvPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -85,12 +95,14 @@ fun SettingsScreen(
                     val isValid = withContext(Dispatchers.IO) {
                         val stats = repository.getDurationStats()
                         val classifier = CustomMLClassifier(context, path, stats.first, stats.second)
-                        classifier.isValid()
+                        val valid = classifier.isValid()
+                        if (valid) customFeatureCount = classifier.inputFeatureCount
+                        valid
                     }
                     if (isValid) {
                         repository.backfillCustomPredictions(context, path, userMlMean, userMlStd)
                         repository.setUseUserMlModel(true)
-                        Toast.makeText(context, "Custom model active & backfilled!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Custom model active! ($customFeatureCount features detected)", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(context, "Invalid model format", Toast.LENGTH_LONG).show()
                     }
@@ -103,21 +115,30 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showDocDialog = false },
             confirmButton = { TextButton(onClick = { showDocDialog = false }) { Text("Got it") } },
-            title = { Text("How to Train Your Model") },
+            title = { Text("Model Lab: How to Train") },
             text = {
                 val scrollState = rememberScrollState()
                 Column(modifier = Modifier.verticalScroll(scrollState)) {
-                    Text("1. Features (Order matters):", fontWeight = FontWeight.Bold)
-                    Text("• start_offset: hours from planned bedtime (-12 to 12)")
-                    Text("• end_offset: hours from planned bedtime (-12 to 12)")
-                    Text("• duration_z_score: (seconds - mean) / std_dev")
+                    Text("The app dynamically supports any model trained on the features exported in your CSV.", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(12.dp))
+                    
+                    Text("1. Input Layer (Order Matters):", fontWeight = FontWeight.Bold)
+                    Text("Your model can use 2 or 3 inputs:")
+                    Text("• 2 Inputs: [start_offset, end_offset]")
+                    Text("• 3 Inputs: [start_offset, end_offset, duration_z_score]")
                     Spacer(Modifier.height(8.dp))
-                    Text("2. Model Architecture:", fontWeight = FontWeight.Bold)
-                    Text("• Input Layer: shape [1, 3]")
-                    Text("• Output Layer: shape [1, 1] (Sigmoid probability)")
+                    
+                    Text("2. Definitions:", fontWeight = FontWeight.Bold)
+                    Text("• Offsets: Hours from planned bedtime (-12 to 12).")
+                    Text("• Z-Score: (seconds - mean) / std_dev.")
                     Spacer(Modifier.height(8.dp))
-                    Text("3. Scaling Calibration:", fontWeight = FontWeight.Bold)
-                    Text("Enter the MEAN and STD DEV from your training script below.")
+                    
+                    Text("3. Architecture:", fontWeight = FontWeight.Bold)
+                    Text("• Output Layer: Must be [1, 1] shape with a Sigmoid activation (probability 0 to 1).")
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Text("Tip:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Clean your CSV of 'noisy' manual edits before training for better accuracy.")
                 }
             }
         )
@@ -160,7 +181,11 @@ fun SettingsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Custom TFLite Model", fontWeight = FontWeight.Bold)
-                        Text(if (userMlPath != null) "Custom model loaded" else "No custom model", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text = if (userMlPath != null) "Loaded: $customFeatureCount features detected" else "No custom model",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (userMlPath != null) MaterialTheme.colorScheme.primary else Color.Gray
+                        )
                     }
                     Switch(
                         checked = useUserMl,
@@ -176,7 +201,7 @@ fun SettingsScreen(
                 
                 Spacer(Modifier.height(16.dp))
                 
-                Text("Model Calibration", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text("Model Calibration (For 3-feature models)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = meanText,
@@ -184,7 +209,8 @@ fun SettingsScreen(
                         label = { Text("Mean") },
                         modifier = Modifier.weight(1f),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = customFeatureCount == 3 || userMlPath == null
                     )
                     OutlinedTextField(
                         value = stdText,
@@ -192,7 +218,8 @@ fun SettingsScreen(
                         label = { Text("Std Dev") },
                         modifier = Modifier.weight(1f),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = customFeatureCount == 3 || userMlPath == null
                     )
                 }
                 
@@ -208,7 +235,8 @@ fun SettingsScreen(
                             Toast.makeText(context, "Calibration saved", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    modifier = Modifier.align(Alignment.End)
+                    modifier = Modifier.align(Alignment.End),
+                    enabled = customFeatureCount == 3 || userMlPath == null
                 ) {
                     Text("SAVE CALIBRATION")
                 }

@@ -4,7 +4,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +34,7 @@ class SleepTrackingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (startTime == 0L) {
             startTime = System.currentTimeMillis()
+            Log.d("SleepTrackingService", "🚀 Sleep Tracking Session Started.")
             createNotificationChannel()
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sleep Tracking Active")
@@ -38,7 +42,12 @@ class SleepTrackingService : Service() {
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
-            startForeground(NOTIFICATION_ID, notification)
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
         }
         return START_STICKY
     }
@@ -48,6 +57,17 @@ class SleepTrackingService : Service() {
         if (startTime > 0) {
             val endTime = System.currentTimeMillis()
             val seconds = (endTime - startTime) / 1000
+
+            // --- 1-HOUR GUARD LOGIC ---
+            // If the lock was less than 1 hour, we ignore it completely.
+            if (seconds < 3600) {
+                Log.d("SleepTrackingService", "🔇 Session too short ($seconds s). Discarding.")
+                startTime = 0L
+                super.onDestroy()
+                return
+            }
+
+            Log.d("SleepTrackingService", "🏁 Session Complete ($seconds s). Processing ML Lab...")
 
             val result = runBlocking(Dispatchers.IO) {
                 val settings: UserSettings = repository.userSettings.first()
@@ -72,23 +92,18 @@ class SleepTrackingService : Service() {
                 Pair(labResult, targetHour)
             }
 
-            // GROUND TRUTH LOGIC:
-            // isRealSleep is INITIALIZED by the Dumb Model (rules).
-            // It stays as the "Gold Standard" for training exports.
-            val groundTruth = result.first.dumb
-
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
                 durationSeconds = seconds,
-                isRealSleep = groundTruth,
+                isRealSleep = result.first.dumb, // Rules serve as the initial "Truth"
                 targetBedtimeHour = result.second,
-                // ML models are just observers, they don't set the truth
                 predDefaultMl = result.first.defaultMl,
                 predCustomMl = result.first.customMl
             )
 
             repository.addSleepSession(session)
+            Log.d("SleepTrackingService", "💾 Session Saved to DB.")
         }
         startTime = 0L
         super.onDestroy()
