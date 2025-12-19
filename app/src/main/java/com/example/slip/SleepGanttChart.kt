@@ -8,10 +8,10 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,7 +43,7 @@ fun VisualizationPager(
             state = pagerState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(240.dp)
+                .height(245.dp)
         ) { page ->
             when (page) {
                 0 -> SleepGanttChart(sessions, onSessionClick)
@@ -136,12 +136,24 @@ fun SleepContributionGraph(
     sessions: List<SleepSession>,
     onDayClick: (Long) -> Unit = {}
 ) {
-    val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-    val totalWeeks = 53
+    val availableYears = remember(sessions) {
+        if (sessions.isEmpty()) listOf(Calendar.getInstance().get(Calendar.YEAR))
+        else {
+            val cal = Calendar.getInstance()
+            sessions.map { 
+                cal.timeInMillis = it.startTimeMillis
+                cal.get(Calendar.YEAR)
+            }.distinct().sortedDescending()
+        }
+    }
     
-    val daysData = remember(sessions, currentYear) {
+    var selectedYear by remember { mutableIntStateOf(availableYears.first()) }
+    var showYearMenu by remember { mutableStateOf(false) }
+
+    val totalWeeks = 53
+    val daysData = remember(sessions, selectedYear) {
         val calendar = Calendar.getInstance().apply {
-            set(Calendar.YEAR, currentYear)
+            set(Calendar.YEAR, selectedYear)
             set(Calendar.MONTH, Calendar.JANUARY)
             set(Calendar.DAY_OF_MONTH, 1)
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
@@ -186,7 +198,38 @@ fun SleepContributionGraph(
     }
 
     Column(modifier = Modifier.padding(16.dp)) {
-        Text("Sleep Consistency in $currentYear", style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Sleep Consistency", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.width(8.dp))
+            Box {
+                Surface(
+                    onClick = { showYearMenu = true },
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.height(24.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(selectedYear.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.ArrowDropDown, null, modifier = Modifier.size(16.dp))
+                    }
+                }
+                DropdownMenu(expanded = showYearMenu, onDismissRequest = { showYearMenu = false }) {
+                    availableYears.forEach { year ->
+                        DropdownMenuItem(
+                            text = { Text(year.toString()) },
+                            onClick = {
+                                selectedYear = year
+                                showYearMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        
         Spacer(Modifier.height(16.dp))
         
         Row {
@@ -232,7 +275,8 @@ fun SleepContributionGraph(
                                 val color = when {
                                     sleepSeconds == 0L -> MaterialTheme.colorScheme.surfaceContainer
                                     sleepSeconds < 4 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                                    sleepSeconds < 7 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    sleepSeconds < 6 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                    sleepSeconds < 8 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
                                     else -> MaterialTheme.colorScheme.primary
                                 }
                                 Box(

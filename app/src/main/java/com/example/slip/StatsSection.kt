@@ -25,38 +25,32 @@ fun StatsSection(
         return
     }
     
-    val isMLActive = sessions.size >= 100
+    val totalHistory = sessions.size
+    val isSystemMlActive = totalHistory >= 100
     val sevenDaysAgoMillis = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
 
+    // Filter for sessions in the last 7 days.
     val recentSessions = sessions.filter { it.startTimeMillis >= sevenDaysAgoMillis }
     val recentRealSleepSessions = recentSessions.filter { it.isRealSleep == true }
 
-    val weeklyAverageHours = if (recentRealSleepSessions.isNotEmpty()) {
-        (recentRealSleepSessions.sumOf { it.durationSeconds } / 7.0) / 3600.0
-    } else {
-        0.0
-    }
+    // 1. Routine Consistency (How often we match the 'Dumb' model rules)
+    val weeklyConsistency = if (recentSessions.isNotEmpty()) {
+        val onTimeSlept = recentSessions.count { it.isRealSleep == true }
+        (onTimeSlept * 100) / recentSessions.size
+    } else 0
 
+    // 2. Avg Sleep Duration
+    val weeklyAverageHours = if (recentRealSleepSessions.isNotEmpty()) {
+        (recentRealSleepSessions.sumOf { it.durationSeconds }.toDouble() / recentRealSleepSessions.size) / 3600.0
+    } else 0.0
+
+    // 3. Longest/Shortest
     val longestSleepHours = (recentRealSleepSessions.maxOfOrNull { it.durationSeconds } ?: 0L) / 3600.0
     val shortestSleepHours = (recentRealSleepSessions.minOfOrNull { it.durationSeconds } ?: 0L) / 3600.0
 
-    val totalScreenOffSeconds = recentSessions.sumOf { it.durationSeconds }
-    val totalTimeInWeekSeconds = 7 * 24 * 3600
-    val avgDailyScreenOnHours = (totalTimeInWeekSeconds - totalScreenOffSeconds).coerceAtLeast(0) / 7.0 / 3600.0
-
-    val avgDailyLocks = if (recentSessions.isNotEmpty()) {
-        recentSessions.size / 7.0
-    } else {
-        0.0
-    }
-
-    val todayStartMillis = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-    }.timeInMillis
-
-    val locksToday = sessions.count { it.startTimeMillis >= todayStartMillis }
+    // 4. Last Night Recap
+    val lastSession = sessions.firstOrNull()
+    val lastDurationHours = (lastSession?.durationSeconds ?: 0L) / 3600.0
 
     Column(
         modifier = Modifier.padding(bottom = 8.dp),
@@ -68,7 +62,7 @@ fun StatsSection(
                 .padding(horizontal = 16.dp, vertical = 4.dp)
                 .clickable(onClick = onStatusClick),
             shape = CircleShape,
-            color = if (isMLActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            color = if (isSystemMlActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -78,32 +72,34 @@ fun StatsSection(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(if (isMLActive) Color(0xFF4CAF50) else Color.Gray)
+                        .background(if (isSystemMlActive) Color(0xFF4CAF50) else Color.Gray)
                 )
                 Spacer(Modifier.width(8.dp))
+                val statusText = if (isSystemMlActive) "Model Lab Active" else "Training Model ($totalHistory/100)"
                 Text(
-                    text = if (isMLActive) "ML Mode: ACTIVE (Tap for Lab)" else "ML Mode: COLLECTING DATA (${sessions.size}/100)",
+                    text = statusText,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
 
+        // --- STATS GRID ---
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            StatCard(label = "Avg Sleep", value = "%.1f".format(weeklyAverageHours), unit = "hrs/day", modifier = Modifier.weight(1f))
-            StatCard(label = "Screen Time", value = "%.1f".format(avgDailyScreenOnHours), unit = "hrs/day", modifier = Modifier.weight(1f))
-            StatCard(label = "Unlocks Today", value = locksToday.toString(), unit = "", modifier = Modifier.weight(1f))
+            StatCard(label = "Routine Score", value = "$weeklyConsistency%", unit = "match", modifier = Modifier.weight(1f))
+            StatCard(label = "Avg Session", value = "%.1f".format(weeklyAverageHours), unit = "hrs", modifier = Modifier.weight(1f))
+            StatCard(label = "Last Session", value = "%.1f".format(lastDurationHours), unit = "hrs", modifier = Modifier.weight(1f))
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            StatCard(label = "Longest Sleep", value = "%.1f".format(longestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
-            StatCard(label = "Shortest Sleep", value = "%.1f".format(shortestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
-            StatCard(label = "Avg Unlocks", value = "%.0f".format(avgDailyLocks), unit = "/day", modifier = Modifier.weight(1f))
+            StatCard(label = "Longest", value = "%.1f".format(longestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
+            StatCard(label = "Shortest", value = "%.1f".format(shortestSleepHours), unit = "hrs", modifier = Modifier.weight(1f))
+            StatCard(label = "Total Logs", value = totalHistory.toString(), unit = "total", modifier = Modifier.weight(1f))
         }
     }
 }
