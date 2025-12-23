@@ -55,7 +55,7 @@ data class UserSettings(
 
 /**
  * Checks if the current time is within the monitoring window.
- * Window = 1hr before bedtime until 12 hours later (Automatic Window).
+ * Window = 2hrs before bedtime until 12 hours later (Automatic Window).
  */
 fun UserSettings.isInsideMonitoringWindow(currentTimeMillis: Long): Boolean {
     val calendar = Calendar.getInstance().apply { timeInMillis = currentTimeMillis }
@@ -66,8 +66,8 @@ fun UserSettings.isInsideMonitoringWindow(currentTimeMillis: Long): Boolean {
     val currentMins = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
     val bedtimeMins = targetBedtime.hour * 60 + targetBedtime.minute
     
-    // Start window 1 hour before bedtime
-    val startMonitoringMins = (bedtimeMins - 60 + 1440) % 1440
+    // Start window 2 hours before bedtime
+    val startMonitoringMins = (bedtimeMins - 120 + 1440) % 1440
     // End window 12 hours after bedtime
     val endMonitoringMins = (bedtimeMins + 720) % 1440
 
