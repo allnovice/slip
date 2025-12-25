@@ -13,6 +13,9 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.NightsStay
+import androidx.compose.material.icons.filled.Snooze
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,9 +34,9 @@ fun SleepSessionList(
     sessions: List<SleepSession>,
     modifier: Modifier = Modifier,
     onDelete: (SleepSession) -> Unit,
-    onEdit: (session: SleepSession, newStart: Long, newEnd: Long, isSleep: Boolean) -> Unit,
+    onEdit: (session: SleepSession, newStart: Long, newEnd: Long, category: String) -> Unit,
     onAdd: (SleepSession) -> Unit,
-    onLabel: (session: SleepSession, isRealSleep: Boolean) -> Unit,
+    onLabel: (session: SleepSession, category: String) -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToModelLab: () -> Unit,
     repository: SleepDataRepository,
@@ -53,15 +56,15 @@ fun SleepSessionList(
                 sessionToEdit = null
                 showAddDialog = false
             },
-            onSave = { newStart, newEnd, isSleep ->
+            onSave = { newStart, newEnd, category ->
                 if (sessionToEdit != null) {
-                    onEdit(sessionToEdit!!, newStart, newEnd, isSleep)
+                    onEdit(sessionToEdit!!, newStart, newEnd, category)
                 } else {
                     val newSession = SleepSession(
                         startTimeMillis = newStart,
                         endTimeMillis = newEnd,
                         durationSeconds = (newEnd - newStart) / 1000,
-                        isRealSleep = isSleep
+                        category = category
                     )
                     onAdd(newSession)
                 }
@@ -225,7 +228,7 @@ fun SleepLogRow(
     onDeleteClick: () -> Unit
 ) {
     val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
-    val isSleep = session.isRealSleep ?: false
+    val category = session.category
 
     fun formatDuration(totalSeconds: Long): String {
         val hours = totalSeconds / 3600
@@ -233,7 +236,13 @@ fun SleepLogRow(
         return "${hours}h ${minutes}m"
     }
 
-    val baseColor = if (isSleep) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLowest
+    val (icon, tint) = when (category) {
+        SleepSession.CATEGORY_SLEEP -> Icons.Default.NightsStay to MaterialTheme.colorScheme.primary
+        SleepSession.CATEGORY_NAP -> Icons.Default.Snooze to MaterialTheme.colorScheme.secondary
+        else -> Icons.Default.Block to Color.Gray
+    }
+
+    val baseColor = if (category == SleepSession.CATEGORY_SLEEP) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLowest
     val containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer else baseColor
 
     Card(
@@ -242,14 +251,24 @@ fun SleepLogRow(
         onClick = onEditClick
     ) {
         Row(
-            modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "${timeFormatter.format(session.startTimeMillis)} — ${timeFormatter.format(session.endTimeMillis)}",
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f)
-            )
+            Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(12.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "${timeFormatter.format(session.startTimeMillis)} — ${timeFormatter.format(session.endTimeMillis)}",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = category.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tint,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
             Text(
                 text = formatDuration(session.durationSeconds),

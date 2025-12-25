@@ -31,7 +31,7 @@ fun SleepBarChart(sessions: List<SleepSession>) {
             val sessionCalendar = Calendar.getInstance().apply { timeInMillis = it.startTimeMillis }
             sessionCalendar.get(Calendar.YEAR) == calendar.get(Calendar.YEAR) &&
                     sessionCalendar.get(Calendar.DAY_OF_YEAR) == calendar.get(Calendar.DAY_OF_YEAR)
-        }.filter { it.isRealSleep == true }
+        }.filter { it.category == SleepSession.CATEGORY_SLEEP }
             .sumOf { it.durationSeconds }
 
         val totalSleepHours = totalSleepSeconds / 3600f
@@ -40,7 +40,7 @@ fun SleepBarChart(sessions: List<SleepSession>) {
     }
 
     // Find the max hours to scale the bars correctly
-    val maxHours = weeklyData.maxOfOrNull { it.second } ?: 8f
+    val maxHours = (weeklyData.maxOfOrNull { it.second } ?: 8f).coerceAtLeast(8f)
 
     // 2. Draw the chart
     Row(

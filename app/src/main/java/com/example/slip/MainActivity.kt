@@ -101,11 +101,11 @@ fun AppMainScreen(repository: SleepDataRepository) {
                     sessions = sessions,
                     repository = repository,
                     onDelete = { session -> repository.deleteSession(session) },
-                    onEdit = { session, newStart, newEnd, isSleep ->
-                        repository.editSession(session, newStart, newEnd, isSleep)
+                    onEdit = { session, newStart, newEnd, category ->
+                        repository.editSession(session, newStart, newEnd, category)
                     },
                     onAdd = { newSession -> repository.addSleepSession(newSession) },
-                    onLabel = { session, isRealSleep -> repository.labelSession(session, isRealSleep) },
+                    onLabel = { session, category -> repository.labelSession(session, category) },
                     onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) },
                     onNavigateToModelLab = { navController.navigate(AppRoutes.MODEL_LAB) }
                 )

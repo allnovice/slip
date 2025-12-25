@@ -52,7 +52,11 @@ class SleepDataRepository private constructor(
     }
 
     val isMonitoringEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.IS_MONITORING_ENABLED] ?: false
+        preferences[PreferencesKeys.IS_MONITORING_ENABLED] ?: true
+    }
+
+    val sleepTargetHours: Flow<Int> = dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.SLEEP_TARGET_HOURS] ?: 7
     }
 
     suspend fun getSessionCount(): Int = sleepSessionDao.getSessionCount()
@@ -76,21 +80,21 @@ class SleepDataRepository private constructor(
         }
     }
 
-    fun editSession(session: SleepSession, newStart: Long, newEnd: Long, isSleep: Boolean) {
+    fun editSession(session: SleepSession, newStart: Long, newEnd: Long, category: String) {
         CoroutineScope(Dispatchers.IO).launch {
             val updatedSession = session.copy(
                 startTimeMillis = newStart,
                 endTimeMillis = newEnd,
                 durationSeconds = (newEnd - newStart) / 1000,
-                isRealSleep = isSleep
+                category = category
             )
             sleepSessionDao.update(updatedSession)
         }
     }
 
-    fun labelSession(session: SleepSession, isRealSleep: Boolean) {
+    fun labelSession(session: SleepSession, category: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            val updatedSession = session.copy(isRealSleep = isRealSleep)
+            val updatedSession = session.copy(category = category)
             sleepSessionDao.update(updatedSession)
         }
     }
@@ -127,28 +131,20 @@ class SleepDataRepository private constructor(
         }
     }
 
-    suspend fun backfillSystemPredictions(context: Context) {
-        withContext(Dispatchers.IO) {
-            val stats = getDurationStats()
-            val classifier = DefaultMLClassifier(context, stats.first, stats.second)
-            val allSessions = sleepSessionDao.getAllSessionsList()
-            allSessions.forEach { session ->
-                val prediction = classifier.isRealSleep(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
-                if (prediction != session.predDefaultMl) {
-                    sleepSessionDao.update(session.copy(predDefaultMl = prediction))
-                }
-            }
+    suspend fun setSleepTargetHours(hours: Int) {
+        dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SLEEP_TARGET_HOURS] = hours
         }
     }
 
     suspend fun backfillCustomPredictions(context: Context, path: String, mean: Float, std: Float) {
         withContext(Dispatchers.IO) {
-            val classifier = CustomMLClassifier(context, path, mean, std)
+            val classifier = UserCustomClassifier(path, mean, std)
             val allSessions = sleepSessionDao.getAllSessionsList()
             allSessions.forEach { session ->
-                val prediction = classifier.isRealSleep(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
-                if (prediction != session.predCustomMl) {
-                    sleepSessionDao.update(session.copy(predCustomMl = prediction))
+                val newCategory = classifier.classify(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
+                if (newCategory != null && newCategory != session.category) {
+                    sleepSessionDao.update(session.copy(category = newCategory))
                 }
             }
         }
@@ -185,6 +181,7 @@ class SleepDataRepository private constructor(
         val USER_ML_MEAN = floatPreferencesKey("user_ml_mean")
         val USER_ML_STD = floatPreferencesKey("user_ml_std")
         val IS_MONITORING_ENABLED = booleanPreferencesKey("is_monitoring_enabled")
+        val SLEEP_TARGET_HOURS = intPreferencesKey("sleep_target_hours")
     }
 
     companion object {

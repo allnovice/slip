@@ -31,6 +31,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -61,11 +62,15 @@ fun SettingsScreen(
     var stdText by remember(userMlStd) { mutableStateOf(userMlStd.toString()) }
 
     var customFeatureCount by remember { mutableIntStateOf(0) }
+    val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
     
-    LaunchedEffect(userMlPath) {
-        userMlPath?.let { path ->
-            val classifier = CustomMLClassifier(context, path, userMlMean, userMlStd)
+    LaunchedEffect(userMlPath, modelExists) {
+        val path = userMlPath
+        if (modelExists && path != null) {
+            val classifier = UserCustomClassifier(path, userMlMean, userMlStd)
             customFeatureCount = classifier.inputFeatureCount
+        } else {
+            customFeatureCount = 0
         }
     }
 
@@ -74,10 +79,9 @@ fun SettingsScreen(
     ) { uri: Uri? ->
         uri?.let {
             coroutineScope.launch {
-                val success = importCsv(context, it, onAddSession)
+                val success = importCsv(context, it, onAddSession, settings)
                 if (success) {
-                    repository.backfillSystemPredictions(context)
-                    Toast.makeText(context, "Imported & Backfilled!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Imported!", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Import failed", Toast.LENGTH_SHORT).show()
                 }
@@ -94,7 +98,7 @@ fun SettingsScreen(
                 if (path != null) {
                     val isValid = withContext(Dispatchers.IO) {
                         val stats = repository.getDurationStats()
-                        val classifier = CustomMLClassifier(context, path, stats.first, stats.second)
+                        val classifier = UserCustomClassifier(path, stats.first, stats.second)
                         val valid = classifier.isValid()
                         if (valid) customFeatureCount = classifier.inputFeatureCount
                         valid
@@ -102,9 +106,9 @@ fun SettingsScreen(
                     if (isValid) {
                         repository.backfillCustomPredictions(context, path, userMlMean, userMlStd)
                         repository.setUseUserMlModel(true)
-                        Toast.makeText(context, "Custom model active! ($customFeatureCount features detected)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Model active! ($customFeatureCount features)", Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(context, "Invalid model format", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Invalid format (Requires 3 outputs)", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -115,30 +119,21 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showDocDialog = false },
             confirmButton = { TextButton(onClick = { showDocDialog = false }) { Text("Got it") } },
-            title = { Text("Model Lab: How to Train") },
+            title = { Text("Custom Model Guide") },
             text = {
                 val scrollState = rememberScrollState()
                 Column(modifier = Modifier.verticalScroll(scrollState)) {
-                    Text("The app dynamically supports any model trained on the features exported in your CSV.", style = MaterialTheme.typography.bodySmall)
+                    Text("The app maps your TFLite output indices directly to these categories:", style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(12.dp))
                     
-                    Text("1. Input Layer (Order Matters):", fontWeight = FontWeight.Bold)
-                    Text("Your model can use 2 or 3 inputs:")
-                    Text("• 2 Inputs: [start_offset, end_offset]")
-                    Text("• 3 Inputs: [start_offset, end_offset, duration_z_score]")
-                    Spacer(Modifier.height(8.dp))
+                    Text("Output Requirements:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Index 0: SLEEP", fontWeight = FontWeight.Bold)
+                    Text("Index 1: NAP", fontWeight = FontWeight.Bold)
+                    Text("Index 2: IDLE", fontWeight = FontWeight.Bold)
                     
-                    Text("2. Definitions:", fontWeight = FontWeight.Bold)
-                    Text("• Offsets: Hours from planned bedtime (-12 to 12).")
-                    Text("• Z-Score: (seconds - mean) / std_dev.")
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text("3. Architecture:", fontWeight = FontWeight.Bold)
-                    Text("• Output Layer: Must be [1, 1] shape with a Sigmoid activation (probability 0 to 1).")
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Text("Tip:", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Text("Clean your CSV of 'noisy' manual edits before training for better accuracy.")
+                    Spacer(Modifier.height(12.dp))
+                    Text("Input Feature Order (Ordered):", fontWeight = FontWeight.Bold)
+                    Text("1. start_offset, 2. end_offset, 3. duration_z_score, 4. is_weekend, 5. start_time_norm, 6. end_time_norm")
                 }
             }
         )
@@ -166,7 +161,7 @@ fun SettingsScreen(
         HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("AI Classification", style = MaterialTheme.typography.titleLarge)
+            Text("User ML Model Upload", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { showDocDialog = true }) {
                 Icon(Icons.Default.Book, "Documentation", tint = MaterialTheme.colorScheme.primary)
@@ -180,17 +175,17 @@ fun SettingsScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Custom TFLite Model", fontWeight = FontWeight.Bold)
+                        Text("TFLite Classifier", fontWeight = FontWeight.Bold)
                         Text(
-                            text = if (userMlPath != null) "Loaded: $customFeatureCount features detected" else "No custom model",
+                            text = if (modelExists) "Status: Loaded ($customFeatureCount features)" else "Status: No model uploaded",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (userMlPath != null) MaterialTheme.colorScheme.primary else Color.Gray
+                            color = if (modelExists) MaterialTheme.colorScheme.primary else Color.Gray
                         )
                     }
                     Switch(
-                        checked = useUserMl,
+                        checked = useUserMl && modelExists,
                         onCheckedChange = { 
-                            if (userMlPath != null) {
+                            if (modelExists) {
                                 coroutineScope.launch { repository.setUseUserMlModel(it) }
                             } else {
                                 Toast.makeText(context, "Upload a model first", Toast.LENGTH_SHORT).show()
@@ -199,46 +194,45 @@ fun SettingsScreen(
                     )
                 }
                 
-                Spacer(Modifier.height(16.dp))
-                
-                Text("Model Calibration (For 3-feature models)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = meanText,
-                        onValueChange = { meanText = it },
-                        label = { Text("Mean") },
-                        modifier = Modifier.weight(1f),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        enabled = customFeatureCount == 3 || userMlPath == null
-                    )
-                    OutlinedTextField(
-                        value = stdText,
-                        onValueChange = { stdText = it },
-                        label = { Text("Std Dev") },
-                        modifier = Modifier.weight(1f),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        enabled = customFeatureCount == 3 || userMlPath == null
-                    )
-                }
-                
-                TextButton(
-                    onClick = {
-                        val m = meanText.toFloatOrNull()
-                        val s = stdText.toFloatOrNull()
-                        if (m != null && s != null) {
-                            coroutineScope.launch { 
-                                repository.saveUserMlStats(m, s)
-                                userMlPath?.let { repository.backfillCustomPredictions(context, it, m, s) }
+                if (customFeatureCount >= 3) {
+                    Spacer(Modifier.height(16.dp))
+                    val pathLocal = userMlPath
+                    Text("Model Calibration", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = meanText,
+                            onValueChange = { meanText = it },
+                            label = { Text("Mean") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = stdText,
+                            onValueChange = { stdText = it },
+                            label = { Text("Std Dev") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true
+                        )
+                    }
+                    
+                    TextButton(
+                        onClick = {
+                            val m = meanText.toFloatOrNull()
+                            val s = stdText.toFloatOrNull()
+                            if (m != null && s != null && pathLocal != null) {
+                                coroutineScope.launch { 
+                                    repository.saveUserMlStats(m, s)
+                                    repository.backfillCustomPredictions(context, pathLocal, m, s)
+                                }
+                                Toast.makeText(context, "Calibration saved", Toast.LENGTH_SHORT).show()
                             }
-                            Toast.makeText(context, "Calibration saved", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.End),
-                    enabled = customFeatureCount == 3 || userMlPath == null
-                ) {
-                    Text("SAVE CALIBRATION")
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("SAVE CALIBRATION")
+                    }
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -250,7 +244,7 @@ fun SettingsScreen(
                 ) {
                     Icon(Icons.Default.ModelTraining, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Upload .tflite Model")
+                    Text(if (modelExists) "Replace .tflite Model" else "Upload .tflite Model")
                 }
             }
         }
@@ -297,9 +291,9 @@ fun SettingsScreen(
             }
 
             OutlinedButton(onClick = {
-                val header = "id,startTimeMillis,endTimeMillis,durationSeconds,isRealSleep,targetBedtimeHour\n"
+                val header = "id,startTimeMillis,endTimeMillis,durationSeconds,category,heuristicCategory,targetBedtimeHour\n"
                 val csvContent = sessions.joinToString(separator = "\n") { session ->
-                    "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.isRealSleep},${session.targetBedtimeHour}"
+                    "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.category},${session.heuristicCategory},${session.targetBedtimeHour}"
                 }
                 val fileName = "sleep_data_${System.currentTimeMillis()}.csv"
                 val success = saveTextToFile(context, header + csvContent, fileName)
@@ -345,24 +339,68 @@ private fun ClickableTimeRow(time: UserTime, onClick: () -> Unit) {
     }
 }
 
-private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd: (SleepSession) -> Unit): Boolean = withContext(Dispatchers.IO) {
+private suspend fun importCsv(
+    context: android.content.Context, 
+    uri: Uri, 
+    onAdd: (SleepSession) -> Unit,
+    settings: UserSettings
+): Boolean = withContext(Dispatchers.IO) {
     try {
         val dateFormat = SimpleDateFormat("MM/dd/yy h:mm a", Locale.US)
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             val lines = inputStream.bufferedReader().readLines()
             if (lines.size <= 1) return@withContext false
+            val header = lines[0].split(",")
+            
+            // Indices
+            val idIdx = header.indexOf("id")
+            val startIdx = header.indexOf("startTimeMillis")
+            val endIdx = header.indexOf("endTimeMillis")
+            val durIdx = header.indexOf("durationSeconds")
+            val catIdx = header.indexOf("category")
+            val heurCatIdx = header.indexOf("heuristicCategory")
+            val targetIdx = header.indexOf("targetBedtimeHour")
+
             lines.drop(1).forEach { line ->
                 val parts = line.split(",")
                 if (parts.size >= 5) {
-                    val startMillis = try { parts[1].toLong() } catch (_: Exception) { dateFormat.parse(parts[1])?.time ?: 0L }
-                    val endMillis = try { parts[2].toLong() } catch (_: Exception) { dateFormat.parse(parts[2])?.time ?: 0L }
+                    val startMillis = try { parts[startIdx].toLong() } catch (_: Exception) { dateFormat.parse(parts[startIdx])?.time ?: 0L }
+                    val endMillis = try { parts[endIdx].toLong() } catch (_: Exception) { dateFormat.parse(parts[endIdx])?.time ?: 0L }
+                    val duration = parts[durIdx].toLong()
+                    val targetHr = if (targetIdx != -1 && parts.size > targetIdx) parts[targetIdx].toInt() else 22
+
+                    // 1. Determine Category from CSV
+                    val rawCategory = if (catIdx != -1) parts[catIdx].lowercase() else ""
+                    val mappedCategory = when {
+                        rawCategory == "true" || rawCategory == "sleep" -> SleepSession.CATEGORY_SLEEP
+                        rawCategory == "nap" -> SleepSession.CATEGORY_NAP
+                        rawCategory == "idle" -> SleepSession.CATEGORY_IDLE
+                        else -> {
+                            // Run heuristic if CSV doesn't have a valid category
+                            HeuristicClassifier(settings).classify(startMillis, duration, targetHr)
+                        }
+                    }
+
+                    // 2. Determine Heuristic Category (The baseline)
+                    // Logic: If CSV has it, use it. Otherwise, MUST match the initial mappedCategory
+                    val mappedHeurCategory = if (heurCatIdx != -1 && parts.size > heurCatIdx) {
+                        when (parts[heurCatIdx].lowercase()) {
+                            "sleep" -> SleepSession.CATEGORY_SLEEP
+                            "nap" -> SleepSession.CATEGORY_NAP
+                            else -> SleepSession.CATEGORY_IDLE
+                        }
+                    } else {
+                        mappedCategory
+                    }
+
                     val session = SleepSession(
-                        id = parts[0],
+                        id = if (idIdx != -1) parts[idIdx] else java.util.UUID.randomUUID().toString(),
                         startTimeMillis = startMillis,
                         endTimeMillis = endMillis,
-                        durationSeconds = parts[3].toLong(),
-                        isRealSleep = parts[4].toBooleanStrictOrNull(),
-                        targetBedtimeHour = if (parts.size >= 6) parts[5].toInt() else 22
+                        durationSeconds = duration,
+                        category = mappedCategory,
+                        heuristicCategory = mappedHeurCategory,
+                        targetBedtimeHour = targetHr
                     )
                     onAdd(session)
                 }

@@ -83,7 +83,7 @@ fun SleepGanttChart(
         val dayStartMillis = dayCalendar.timeInMillis
         val dayEndMillis = dayStartMillis + 24 * 3600 * 1000
 
-        val sleepBlocksForDay = sessions.filter { it.isRealSleep == true }
+        val sleepBlocksForDay = sessions.filter { it.category == SleepSession.CATEGORY_SLEEP }
             .mapNotNull { session ->
                 val overlapStart = max(session.startTimeMillis, dayStartMillis)
                 val overlapEnd = min(session.endTimeMillis, dayEndMillis)
@@ -168,7 +168,7 @@ fun SleepContributionGraph(
             val dayStart = calendar.timeInMillis
             val dayEnd = dayStart + 24 * 3600 * 1000
             
-            val dailySleepSeconds = sessions.filter { it.isRealSleep == true }
+            val dailySleepSeconds = sessions.filter { it.category == SleepSession.CATEGORY_SLEEP }
                 .sumOf { session ->
                     val overlapStart = max(session.startTimeMillis, dayStart)
                     val overlapEnd = min(session.endTimeMillis, dayEnd)

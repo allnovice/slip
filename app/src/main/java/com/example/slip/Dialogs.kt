@@ -18,14 +18,18 @@ import java.util.*
 fun EditSleepDialog(
     session: SleepSession?,
     onDismiss: () -> Unit,
-    onSave: (newStartTimeMillis: Long, newEndTimeMillis: Long, isRealSleep: Boolean) -> Unit
+    onSave: (newStartTimeMillis: Long, newEndTimeMillis: Long, category: String) -> Unit
 ) {
     val initialStartTime = session?.startTimeMillis ?: System.currentTimeMillis()
     val initialEndTime = session?.endTimeMillis ?: (System.currentTimeMillis() + 8 * 3600 * 1000)
 
     var tempStartTime by remember { mutableStateOf(initialStartTime) }
     var tempEndTime by remember { mutableStateOf(initialEndTime) }
-    var tempIsSleep by remember { mutableStateOf(session?.isRealSleep ?: true) }
+    
+    // Default to SLEEP for new sessions, or use existing category
+    var tempCategory by remember { 
+        mutableStateOf(session?.category ?: SleepSession.CATEGORY_SLEEP) 
+    }
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showStartTimePicker by remember { mutableStateOf(false) }
@@ -37,7 +41,6 @@ fun EditSleepDialog(
         CalendarDatePickerDialog(
             onDismiss = { showDatePicker = false },
             onDateSelected = { selectedDateMillis ->
-                // When a new date is picked, update the base day for both start and end times
                 val startCal = Calendar.getInstance().apply { timeInMillis = tempStartTime }
                 val endCal = Calendar.getInstance().apply { timeInMillis = tempEndTime }
 
@@ -51,7 +54,6 @@ fun EditSleepDialog(
                 newEndCal.set(Calendar.MINUTE, endCal.get(Calendar.MINUTE))
                 tempEndTime = newEndCal.timeInMillis
 
-                // Now, re-check if the end time needs to be pushed to the next day
                 if (tempEndTime <= tempStartTime) {
                     val endCalendar = Calendar.getInstance().apply { timeInMillis = tempEndTime }
                     endCalendar.add(Calendar.DAY_OF_YEAR, 1)
@@ -73,7 +75,6 @@ fun EditSleepDialog(
                 newStartCal.set(Calendar.MINUTE, minute)
                 tempStartTime = newStartCal.timeInMillis
 
-                // After changing start time, re-check if end time needs to be adjusted
                 if (tempEndTime <= tempStartTime) {
                     val endCalendar = Calendar.getInstance().apply { timeInMillis = tempEndTime }
                     endCalendar.add(Calendar.DAY_OF_YEAR, 1)
@@ -89,12 +90,11 @@ fun EditSleepDialog(
         TimePickerDialog(
             onDismiss = { showEndTimePicker = false },
             onConfirm = { hour, minute ->
-                val newEndCal = Calendar.getInstance().apply { timeInMillis = tempStartTime } // Base it on start time's day
+                val newEndCal = Calendar.getInstance().apply { timeInMillis = tempStartTime }
                 newEndCal.set(Calendar.HOUR_OF_DAY, hour)
                 newEndCal.set(Calendar.MINUTE, minute)
                 var newEndTime = newEndCal.timeInMillis
 
-                // If the new end time is before the start time, it must be the next day.
                 if (newEndTime <= tempStartTime) {
                     newEndCal.add(Calendar.DAY_OF_YEAR, 1)
                     newEndTime = newEndCal.timeInMillis
@@ -106,7 +106,6 @@ fun EditSleepDialog(
         )
     }
 
-    // --- Main Dialog UI ---
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (session == null) "Add New Session" else "Edit Session") },
@@ -114,20 +113,44 @@ fun EditSleepDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val dateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
                 val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
-                // The UI rows are correct
+                
                 ClickableFieldRow(label = "Date:", value = dateFormatter.format(tempStartTime), onClick = { showDatePicker = true })
                 Divider()
                 ClickableFieldRow(label = "Start:", value = timeFormatter.format(tempStartTime), onClick = { showStartTimePicker = true })
                 ClickableFieldRow(label = "End:", value = timeFormatter.format(tempEndTime), onClick = { showEndTimePicker = true })
                 Divider()
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Mark as real sleep?")
-                    Switch(checked = tempIsSleep, onCheckedChange = { tempIsSleep = it })
+                
+                Text("Category:", style = MaterialTheme.typography.labelLarge)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CategoryChip(
+                        label = "Sleep",
+                        isSelected = tempCategory == SleepSession.CATEGORY_SLEEP,
+                        onClick = { tempCategory = SleepSession.CATEGORY_SLEEP }
+                    )
+                    CategoryChip(
+                        label = "Nap",
+                        isSelected = tempCategory == SleepSession.CATEGORY_NAP,
+                        onClick = { tempCategory = SleepSession.CATEGORY_NAP }
+                    )
+                    CategoryChip(
+                        label = "Idle",
+                        isSelected = tempCategory == SleepSession.CATEGORY_IDLE,
+                        onClick = { tempCategory = SleepSession.CATEGORY_IDLE }
+                    )
                 }
             }
         },
-        confirmButton = { Button(onClick = { onSave(tempStartTime, tempEndTime, tempIsSleep) }) { Text("Save") } },
+        confirmButton = { Button(onClick = { onSave(tempStartTime, tempEndTime, tempCategory) }) { Text("Save") } },
         dismissButton = { Button(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun CategoryChip(label: String, isSelected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = isSelected,
+        onClick = onClick,
+        label = { Text(label) }
     )
 }
 
@@ -135,7 +158,7 @@ fun EditSleepDialog(
 @Composable
 fun TimePickerDialog(
     onDismiss: () -> Unit,
-    onConfirm: (hour: Int, minute: Int) -> Unit, // Changed to return hour and minute
+    onConfirm: (hour: Int, minute: Int) -> Unit,
     initialTime: Long
 ) {
     val calendar = Calendar.getInstance().apply { timeInMillis = initialTime }
@@ -150,14 +173,12 @@ fun TimePickerDialog(
         text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { TimePicker(state = timePickerState) } },
         confirmButton = {
             Button(onClick = {
-                onConfirm(timePickerState.hour, timePickerState.minute) // Pass back just the hour and minute
+                onConfirm(timePickerState.hour, timePickerState.minute)
             }) { Text("OK") }
         },
         dismissButton = { Button(onClick = onDismiss) { Text("Cancel") } }
     )
 }
-
-// --- THIS IS THE FIX: The bodies of these helper functions are now filled in ---
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

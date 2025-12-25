@@ -8,17 +8,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -30,23 +29,48 @@ fun ModelLabScreen(
     onNavigateBack: () -> Unit
 ) {
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
-    val hasCustomModel = userMlPath != null
-    val totalHistory = sessions.size
-    val isSystemMlActive = totalHistory >= 100
+    val userMlMean by repository.userMlMean.collectAsState(initial = 0f)
+    val userMlStd by repository.userMlStd.collectAsState(initial = 1f)
+    val userSettings by repository.userSettings.collectAsState(initial = UserSettings.default)
+    
+    val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
 
-    val labeledSessions = sessions.filter { it.isRealSleep != null }
-    val totalLabeled = labeledSessions.size
-
-    fun calculateAccuracy(predicate: (SleepSession) -> Boolean): String {
-        if (totalLabeled == 0) return "0%"
-        val matches = labeledSessions.count { predicate(it) == it.isRealSleep }
-        return "${(matches * 100) / totalLabeled}%"
+    // Structure: Session -> (ML Prediction?, Baseline Category)
+    val evaluationResults = remember(sessions, userMlPath, modelExists, userMlMean, userMlStd, userSettings) {
+        val engine = ModelLabEngine(
+            settings = userSettings,
+            customPath = if (modelExists) userMlPath else null,
+            customMean = userMlMean,
+            customStd = userMlStd
+        )
+        
+        sessions.map { session ->
+            val mlPred = if (modelExists) {
+                val cal = java.util.Calendar.getInstance().apply { timeInMillis = session.startTimeMillis }
+                val isWeekend = cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SATURDAY || cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SUNDAY
+                val targetHour = if (isWeekend) userSettings.weekendSleepStart.hour else userSettings.weekdaySleepStart.hour
+                engine.runAll(session.startTimeMillis, session.durationSeconds, targetHour)
+            } else null
+            
+            session to mlPred
+        }
     }
+
+    val totalSessions = evaluationResults.size
+    val mlAccuracy = if (totalSessions > 0 && modelExists) {
+        val matches = evaluationResults.count { it.first.category == it.second }
+        "${(matches * 100) / totalSessions}%"
+    } else null
+
+    val baselineAccuracy = if (totalSessions > 0) {
+        val matches = evaluationResults.count { it.first.category == it.first.heuristicCategory }
+        "${(matches * 100) / totalSessions}%"
+    } else "0%"
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Model Experiment Lab") },
+                title = { Text("Model Performance Lab") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -58,112 +82,122 @@ fun ModelLabScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text("ML Performance Accuracy", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "System ML activates at 100 sessions. Custom ML activates immediately on upload.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
-                )
-                Spacer(Modifier.height(12.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AccuracyCard(
-                        "System ML", 
-                        if (isSystemMlActive) calculateAccuracy { it.predDefaultMl } else "$totalHistory/100",
-                        Modifier.weight(1f),
-                        isActive = isSystemMlActive
+                        title = "Baseline",
+                        subtitle = "Dumb Rule",
+                        value = baselineAccuracy,
+                        isActive = true,
+                        modifier = Modifier.weight(1f)
                     )
-                    AccuracyCard(
-                        "Custom ML", 
-                        if (hasCustomModel) calculateAccuracy { it.predCustomMl } else "N/A", 
-                        Modifier.weight(1f),
-                        isActive = hasCustomModel
-                    )
+                    if (modelExists) {
+                        AccuracyCard(
+                            title = "Custom Model",
+                            subtitle = "TFLite Success",
+                            value = mlAccuracy ?: "0%",
+                            isActive = true,
+                            modifier = Modifier.weight(1f),
+                            isPrimary = true
+                        )
+                    }
                 }
             }
 
             item {
-                Text("Prediction Log", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
-                TableHeader(isSystemMlActive, hasCustomModel)
+                Text(text = "Deep Analysis", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                TableHeader(showMl = modelExists)
             }
 
-            items(sessions) { session ->
-                ComparisonRow(session, isSystemMlActive, hasCustomModel)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            items(evaluationResults) { (session, mlPred) ->
+                ComparisonRow(session, mlPred)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             }
         }
     }
 }
 
 @Composable
-private fun AccuracyCard(label: String, value: String, modifier: Modifier, isActive: Boolean) {
+private fun AccuracyCard(title: String, subtitle: String, value: String, isActive: Boolean, modifier: Modifier, isPrimary: Boolean = false) {
     Card(
         modifier = modifier,
-        colors = if (isActive) CardDefaults.cardColors() else CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPrimary) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) 
+            else MaterialTheme.colorScheme.surfaceVariant
+        )
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(label, style = MaterialTheme.typography.labelSmall)
-            Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            if (!isActive && label == "System ML") {
-                Text("Collecting data", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-            }
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = if (isPrimary) MaterialTheme.colorScheme.primary else Color.Unspecified)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray, fontSize = 9.sp)
         }
     }
 }
 
 @Composable
-private fun TableHeader(showSystem: Boolean, showCustom: Boolean) {
+private fun TableHeader(showMl: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(vertical = 8.dp, horizontal = 4.dp),
+            .padding(vertical = 4.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Time", modifier = Modifier.weight(1.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        if (showSystem) Text("System", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        if (showCustom) Text("Custom", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        Text("TRUTH", modifier = Modifier.weight(1f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text("Session", modifier = Modifier.weight(1.2f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text("BASE", modifier = Modifier.weight(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (showMl) {
+            Text("ML", modifier = Modifier.weight(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+        Text("TRUTH", modifier = Modifier.weight(0.8f), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
 @Composable
-private fun ComparisonRow(session: SleepSession, showSystem: Boolean, showCustom: Boolean) {
+private fun ComparisonRow(session: SleepSession, mlPred: String?) {
     val timeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
     
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = timeFormatter.format(session.startTimeMillis),
-            modifier = Modifier.weight(1.5f),
-            fontSize = 10.sp
-        )
-        if (showSystem) PredictionIcon(session.predDefaultMl, Modifier.weight(1f))
-        if (showCustom) PredictionIcon(session.predCustomMl, Modifier.weight(1f))
-        PredictionIcon(session.isRealSleep ?: false, Modifier.weight(1f), isTruth = true)
+        Column(modifier = Modifier.weight(1.2f)) {
+            Text(text = timeFormatter.format(session.startTimeMillis), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Text(text = "${session.durationSeconds / 3600}h ${ (session.durationSeconds % 3600) / 60}m", fontSize = 8.sp, color = Color.Gray)
+        }
+        
+        CategoryResultIcon(session.heuristicCategory, Modifier.weight(0.8f))
+        
+        if (mlPred != null) {
+            CategoryResultIcon(mlPred, Modifier.weight(0.8f))
+        }
+        
+        CategoryResultIcon(session.category, Modifier.weight(0.8f), isTruth = true)
     }
 }
 
 @Composable
-private fun PredictionIcon(value: Boolean, modifier: Modifier, isTruth: Boolean = false) {
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+private fun CategoryResultIcon(category: String, modifier: Modifier, isTruth: Boolean = false) {
+    val (icon, color) = when (category) {
+        SleepSession.CATEGORY_SLEEP -> Icons.Default.CheckCircle to Color(0xFF4CAF50) 
+        SleepSession.CATEGORY_NAP -> Icons.Default.Psychology to Color(0xFF2196F3)   
+        else -> Icons.Default.Cancel to Color(0xFFE91E63)                             
+    }
+
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(
-            imageVector = if (value) Icons.Default.CheckCircle else Icons.Default.Cancel,
+            imageVector = icon,
             contentDescription = null,
-            tint = when {
-                isTruth -> MaterialTheme.colorScheme.primary
-                value -> Color(0xFF4CAF50)
-                else -> Color(0xFFE91E63)
-            },
-            modifier = Modifier.size(if (isTruth) 20.dp else 18.dp)
+            tint = color,
+            modifier = Modifier.size(16.dp)
+        )
+        Text(
+            text = category,
+            fontSize = 7.sp,
+            fontWeight = FontWeight.Bold,
+            color = color
         )
     }
 }
