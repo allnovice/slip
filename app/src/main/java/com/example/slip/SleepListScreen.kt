@@ -50,9 +50,6 @@ fun SleepSessionList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    val headerDateFormatter = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
-    val groupedSessions = sessions.groupBy { headerDateFormatter.format(it.startTimeMillis) }
-
     if (sessionToEdit != null || showAddDialog) {
         EditSleepDialog(
             session = sessionToEdit,
@@ -89,19 +86,6 @@ fun SleepSessionList(
         }
     }
 
-    // Default collapse older than 7 days
-    val sevenDaysAgo = remember {
-        Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.time
-    }
-    LaunchedEffect(sessions) {
-        groupedSessions.keys.forEach { dateStr ->
-            if (!expandedStateMap.containsKey(dateStr)) {
-                val groupDate = try { headerDateFormatter.parse(dateStr) } catch (e: Exception) { null } ?: Date()
-                expandedStateMap[dateStr] = !groupDate.before(sevenDaysAgo)
-            }
-        }
-    }
-
     Box(modifier = modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
@@ -112,7 +96,7 @@ fun SleepSessionList(
                         sessionToEdit = null
                         showAddDialog = true
                     },
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(56.dp)
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
                 }
@@ -124,11 +108,22 @@ fun SleepSessionList(
                         Text("No logs found.")
                     }
                 } else {
+                    val headerDateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                    val groupedSessions = sessions.groupBy { headerDateFormatter.format(it.startTimeMillis) }
+
+                    val sevenDaysAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.time
+                    groupedSessions.keys.forEach { dateStr ->
+                        if (!expandedStateMap.containsKey(dateStr)) {
+                            val groupDate = try { headerDateFormatter.parse(dateStr) } catch (e: Exception) { null } ?: Date()
+                            expandedStateMap[dateStr] = !groupDate.before(sevenDaysAgo)
+                        }
+                    }
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 80.dp),
-                        verticalArrangement = Arrangement.spacedBy(1.dp)
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         item { 
                             StatsSection(
@@ -139,7 +134,7 @@ fun SleepSessionList(
                             ) 
                         }
 
-                        item { Spacer(Modifier.height(2.dp)) }
+                        item { Spacer(Modifier.height(4.dp)) }
 
                         groupedSessions.forEach { (dateHeader, sessionsForDate) ->
                             stickyHeader {
@@ -150,20 +145,20 @@ fun SleepSessionList(
                                         .fillMaxWidth()
                                         .background(if (isHeaderHighlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
                                         .clickable { expandedStateMap[dateHeader] = !isExpanded }
-                                        .padding(horizontal = 16.dp, vertical = 1.dp),
+                                        .padding(horizontal = 16.dp, vertical = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(text = dateHeader, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    Text(text = dateHeader, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
                                     Icon(
                                         imageVector = if (isExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                                         contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
                             if (expandedStateMap[dateHeader] == true) {
                                 items(sessionsForDate, key = { it.id }) { session ->
-                                    Box(modifier = Modifier.padding(horizontal = 0.dp)) { // Edge-to-edge
+                                    Box(modifier = Modifier.padding(horizontal = 0.dp)) {
                                         SleepLogRow(
                                             session = session,
                                             isHighlighted = highlightedSessionId == session.id,
@@ -208,8 +203,8 @@ fun SleepLogRow(
     val containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer else baseColor
 
     Card(
-        modifier = Modifier.fillMaxWidth().height(40.dp), // Compressed height
-        shape = RoundedCornerShape(0.dp), // Edge-to-edge look
+        modifier = Modifier.fillMaxWidth().height(52.dp), // Increased height for larger fonts
+        shape = RoundedCornerShape(0.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         onClick = onEditClick
     ) {
@@ -217,37 +212,42 @@ fun SleepLogRow(
             modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // LEFT: Icon
-            Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
-            
-            Spacer(Modifier.width(16.dp))
-
-            // CENTER: Time + Category
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            // LEFT: Icon + Label Stacked
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.width(56.dp)
+            ) {
+                Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
                 Text(
                     text = category,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tint,
-                    fontSize = 8.sp
+                    fontSize = 10.sp, // Larger font
+                    fontWeight = FontWeight.Bold,
+                    color = tint
                 )
             }
 
-            // RIGHT: Duration + Delete
-            Text(
-                text = formatDuration(session.durationSeconds),
-                style = MaterialTheme.typography.bodySmall,
-                fontSize = 10.sp,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
+            // CENTER: Time + Duration
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp, // Larger font
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = formatDuration(session.durationSeconds),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 12.sp, // Larger font
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-            IconButton(onClick = onDeleteClick, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
+            // RIGHT: Delete
+            IconButton(onClick = onDeleteClick, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
             }
         }
     }
