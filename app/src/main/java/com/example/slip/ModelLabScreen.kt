@@ -36,6 +36,7 @@ fun ModelLabScreen(
     val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
 
     // Structure: Session -> (ML Prediction?, Baseline Category)
+    // We now use session.targetBedtimeHour to "lock" predictions to the historical context
     val evaluationResults = remember(sessions, userMlPath, modelExists, userMlMean, userMlStd, userSettings) {
         val engine = ModelLabEngine(
             settings = userSettings,
@@ -46,10 +47,8 @@ fun ModelLabScreen(
         
         sessions.map { session ->
             val mlPred = if (modelExists) {
-                val cal = java.util.Calendar.getInstance().apply { timeInMillis = session.startTimeMillis }
-                val isWeekend = cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SATURDAY || cal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.SUNDAY
-                val targetHour = if (isWeekend) userSettings.weekendSleepStart.hour else userSettings.weekdaySleepStart.hour
-                engine.runAll(session.startTimeMillis, session.durationSeconds, targetHour)
+                // Use the target hour that was actually active when this session happened
+                engine.runAll(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
             } else null
             
             session to mlPred

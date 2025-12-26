@@ -14,6 +14,9 @@ interface SleepSessionDao {
     @Query("SELECT COUNT(*) FROM sleep_sessions")
     suspend fun getSessionCount(): Int
 
+    @Query("SELECT * FROM sleep_sessions WHERE id = :id LIMIT 1")
+    suspend fun getSessionById(id: String): SleepSession?
+
     @Query("SELECT AVG(duration_seconds) FROM sleep_sessions")
     suspend fun getDurationMean(): Double?
 

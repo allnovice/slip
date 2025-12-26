@@ -2,6 +2,7 @@ package com.example.slip
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
@@ -10,7 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 
 class SleepTrackingService : Service() {
 
@@ -19,7 +22,8 @@ class SleepTrackingService : Service() {
 
     companion object {
         val isRunning = MutableStateFlow(false)
-        const val NOTIFICATION_ID = 1
+        const val TRACKING_NOTIFICATION_ID = 1
+        const val INTERACTIVE_NOTIFICATION_ID = 2
         const val CHANNEL_ID = "SleepTrackingServiceChannel"
     }
 
@@ -38,7 +42,7 @@ class SleepTrackingService : Service() {
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(TRACKING_NOTIFICATION_ID, notification)
         }
         return START_STICKY
     }
@@ -56,15 +60,13 @@ class SleepTrackingService : Service() {
                 return
             }
 
-            val finalCategory = runBlocking(Dispatchers.IO) {
+            val finalResult = runBlocking(Dispatchers.IO) {
                 val settings: UserSettings = repository.userSettings.first()
                 val customPath: String? = repository.userMlModelPath.first()
                 val customMean: Float = repository.userMlMean.first()
                 val customStd: Float = repository.userMlStd.first()
                 
-                val cal = Calendar.getInstance().apply { timeInMillis = startTime }
-                val isWeekend = cal.get(Calendar.DAY_OF_WEEK) == Calendar.SATURDAY || cal.get(Calendar.DAY_OF_WEEK) == Calendar.SUNDAY
-                val targetHour = if (isWeekend) settings.weekendSleepStart.hour else settings.weekdaySleepStart.hour
+                val targetHour = settings.getTargetHourFor(startTime)
 
                 val engine = ModelLabEngine(
                     settings = settings,
@@ -74,23 +76,59 @@ class SleepTrackingService : Service() {
                 )
                 
                 val category = engine.runAll(startTime, seconds, targetHour)
-                category to targetHour
+                Pair<String, Int>(category, targetHour)
             }
             
-            // Both category and heuristicCategory get the same initial guess
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
                 durationSeconds = seconds,
-                category = finalCategory.first,
-                heuristicCategory = finalCategory.first,
-                targetBedtimeHour = finalCategory.second
+                category = finalResult.first,
+                heuristicCategory = finalResult.first,
+                targetBedtimeHour = finalResult.second
             )
 
             repository.addSleepSession(session)
+
+            // IF CATEGORY IS NAP, SEND INTERACTIVE NOTIFICATION
+            if (finalResult.first == SleepSession.CATEGORY_NAP) {
+                sendNapConfirmationNotification(session)
+            }
         }
         startTime = 0L
         super.onDestroy()
+    }
+
+    private fun sendNapConfirmationNotification(session: SleepSession) {
+        val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
+        val timeRange = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}"
+        
+        val confirmIntent = Intent(this, NotificationActionReceiver::class.java).apply {
+            action = "ACTION_CONFIRM_NAP"
+            putExtra("session_id", session.id)
+            putExtra("notification_id", INTERACTIVE_NOTIFICATION_ID)
+        }
+        val confirmPendingIntent = PendingIntent.getBroadcast(this, 0, confirmIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val idleIntent = Intent(this, NotificationActionReceiver::class.java).apply {
+            action = "ACTION_MARK_IDLE"
+            putExtra("session_id", session.id)
+            putExtra("notification_id", INTERACTIVE_NOTIFICATION_ID)
+        }
+        val idlePendingIntent = PendingIntent.getBroadcast(this, 1, idleIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Did you just take a nap?")
+            .setContentText("Detected session: $timeRange")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .addAction(R.drawable.ic_launcher_foreground, "Yes, it was a nap", confirmPendingIntent)
+            .addAction(R.drawable.ic_launcher_foreground, "No, phone was idle", idlePendingIntent)
+            .build()
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(INTERACTIVE_NOTIFICATION_ID, notification)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

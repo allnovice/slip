@@ -23,11 +23,17 @@ class SleepDataRepository private constructor(
     val sessions: Flow<List<SleepSession>> = sleepSessionDao.getSessions()
 
     val userSettings: Flow<UserSettings> = dataStore.data.map { preferences ->
-        val startWeekday = preferences[PreferencesKeys.WEEKDAY_SLEEP_START] ?: "22:00"
-        val startWeekend = preferences[PreferencesKeys.WEEKEND_SLEEP_START] ?: "23:00"
+        val bedtime = preferences[PreferencesKeys.BASE_BEDTIME] ?: "22:00"
+        val offDaysStr = preferences[PreferencesKeys.OFF_DAYS] ?: "7,1" // Default Sat, Sun
+        
+        val offDaysSet = offDaysStr.split(",")
+            .filter { it.isNotEmpty() }
+            .map { it.toInt() }
+            .toSet()
+
         UserSettings(
-            UserTime.fromString(startWeekday),
-            UserTime.fromString(startWeekend)
+            UserTime.fromString(bedtime),
+            offDaysSet
         )
     }
 
@@ -99,16 +105,17 @@ class SleepDataRepository private constructor(
         }
     }
 
-    suspend fun saveUserSettings(newSettings: UserSettings) {
-        dataStore.edit { preferences ->
-            preferences[PreferencesKeys.WEEKDAY_SLEEP_START] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekdaySleepStart.hour, newSettings.weekdaySleepStart.minute)
-            preferences[PreferencesKeys.WEEKEND_SLEEP_START] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.weekendSleepStart.hour, newSettings.weekendSleepStart.minute)
+    suspend fun labelSessionById(id: String, category: String) {
+        val session = sleepSessionDao.getSessionById(id)
+        session?.let {
+            sleepSessionDao.update(it.copy(category = category))
         }
     }
 
-    suspend fun saveFilterDuration(duration: Float) {
+    suspend fun saveUserSettings(newSettings: UserSettings) {
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.FILTER_DURATION] = duration
+            preferences[PreferencesKeys.BASE_BEDTIME] = String.format(java.util.Locale.US, "%02d:%02d", newSettings.baseBedtime.hour, newSettings.baseBedtime.minute)
+            preferences[PreferencesKeys.OFF_DAYS] = newSettings.offDays.joinToString(",")
         }
     }
 
@@ -138,16 +145,7 @@ class SleepDataRepository private constructor(
     }
 
     suspend fun backfillCustomPredictions(context: Context, path: String, mean: Float, std: Float) {
-        withContext(Dispatchers.IO) {
-            val classifier = UserCustomClassifier(path, mean, std)
-            val allSessions = sleepSessionDao.getAllSessionsList()
-            allSessions.forEach { session ->
-                val newCategory = classifier.classify(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
-                if (newCategory != null && newCategory != session.category) {
-                    sleepSessionDao.update(session.copy(category = newCategory))
-                }
-            }
-        }
+        // Predictions computed on the fly now
     }
 
     suspend fun saveUserMlModel(context: Context, uri: Uri): String? {
@@ -173,8 +171,8 @@ class SleepDataRepository private constructor(
     }
 
     private object PreferencesKeys {
-        val WEEKDAY_SLEEP_START = stringPreferencesKey("weekday_sleep_start")
-        val WEEKEND_SLEEP_START = stringPreferencesKey("weekend_sleep_start")
+        val BASE_BEDTIME = stringPreferencesKey("base_bedtime")
+        val OFF_DAYS = stringPreferencesKey("off_days")
         val FILTER_DURATION = floatPreferencesKey("filter_duration")
         val USE_USER_ML_MODEL = booleanPreferencesKey("use_user_ml_model")
         val USER_ML_MODEL_PATH = stringPreferencesKey("user_ml_model_path")
