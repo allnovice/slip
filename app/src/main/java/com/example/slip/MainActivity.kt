@@ -105,7 +105,9 @@ fun AppMainScreen(repository: SleepDataRepository) {
                         repository.editSession(session, newStart, newEnd, category)
                     },
                     onAdd = { newSession -> repository.addSleepSession(newSession) },
-                    onLabel = { session, category -> repository.labelSession(session, category) },
+                    onLabel = { session, category -> 
+                        repository.labelSessionById(session.id, category) 
+                    },
                     onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) },
                     onNavigateToModelLab = { navController.navigate(AppRoutes.MODEL_LAB) }
                 )

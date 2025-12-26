@@ -29,25 +29,26 @@ fun ModelLabScreen(
     onNavigateBack: () -> Unit
 ) {
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
+    val useUserMl by repository.useUserMlModel.collectAsState(initial = false)
     val userMlMean by repository.userMlMean.collectAsState(initial = 0f)
     val userMlStd by repository.userMlStd.collectAsState(initial = 1f)
     val userSettings by repository.userSettings.collectAsState(initial = UserSettings.default)
     
     val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
+    
+    // MASTER UI SWITCH: Only show ML if it exists AND is toggled ON
+    val showMlData = modelExists && useUserMl
 
-    // Structure: Session -> (ML Prediction?, Baseline Category)
-    // We now use session.targetBedtimeHour to "lock" predictions to the historical context
-    val evaluationResults = remember(sessions, userMlPath, modelExists, userMlMean, userMlStd, userSettings) {
+    val evaluationResults = remember(sessions, userMlPath, showMlData, userMlMean, userMlStd, userSettings) {
         val engine = ModelLabEngine(
             settings = userSettings,
-            customPath = if (modelExists) userMlPath else null,
+            customPath = if (showMlData) userMlPath else null,
             customMean = userMlMean,
             customStd = userMlStd
         )
         
         sessions.map { session ->
-            val mlPred = if (modelExists) {
-                // Use the target hour that was actually active when this session happened
+            val mlPred = if (showMlData) {
                 engine.runAll(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
             } else null
             
@@ -55,15 +56,14 @@ fun ModelLabScreen(
         }
     }
 
-    val totalSessions = evaluationResults.size
-    val mlAccuracy = if (totalSessions > 0 && modelExists) {
+    val mlAccuracy = if (evaluationResults.isNotEmpty() && showMlData) {
         val matches = evaluationResults.count { it.first.category == it.second }
-        "${(matches * 100) / totalSessions}%"
+        "${(matches * 100) / evaluationResults.size}%"
     } else null
 
-    val baselineAccuracy = if (totalSessions > 0) {
+    val baselineAccuracy = if (evaluationResults.isNotEmpty()) {
         val matches = evaluationResults.count { it.first.category == it.first.heuristicCategory }
-        "${(matches * 100) / totalSessions}%"
+        "${(matches * 100) / evaluationResults.size}%"
     } else "0%"
 
     Scaffold(
@@ -87,15 +87,15 @@ fun ModelLabScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AccuracyCard(
                         title = "Baseline",
-                        subtitle = "Dumb Rule",
+                        subtitle = "Rule Success",
                         value = baselineAccuracy,
                         isActive = true,
                         modifier = Modifier.weight(1f)
                     )
-                    if (modelExists) {
+                    if (showMlData) {
                         AccuracyCard(
                             title = "Custom Model",
-                            subtitle = "TFLite Success",
+                            subtitle = "ML Success",
                             value = mlAccuracy ?: "0%",
                             isActive = true,
                             modifier = Modifier.weight(1f),
@@ -106,9 +106,9 @@ fun ModelLabScreen(
             }
 
             item {
-                Text(text = "Deep Analysis", style = MaterialTheme.typography.titleSmall)
+                Text(text = if (showMlData) "Comparison Analysis" else "Baseline Analysis", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(4.dp))
-                TableHeader(showMl = modelExists)
+                TableHeader(showMl = showMlData)
             }
 
             items(evaluationResults) { (session, mlPred) ->

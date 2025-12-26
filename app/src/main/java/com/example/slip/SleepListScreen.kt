@@ -7,12 +7,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Snooze
 import androidx.compose.material.icons.filled.Block
@@ -23,10 +23,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
-import java.util.Locale
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -49,6 +50,9 @@ fun SleepSessionList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    val headerDateFormatter = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
+    val groupedSessions = sessions.groupBy { headerDateFormatter.format(it.startTimeMillis) }
+
     if (sessionToEdit != null || showAddDialog) {
         EditSleepDialog(
             session = sessionToEdit,
@@ -64,7 +68,8 @@ fun SleepSessionList(
                         startTimeMillis = newStart,
                         endTimeMillis = newEnd,
                         durationSeconds = (newEnd - newStart) / 1000,
-                        category = category
+                        category = category,
+                        heuristicCategory = category
                     )
                     onAdd(newSession)
                 }
@@ -74,7 +79,7 @@ fun SleepSessionList(
         )
     }
 
-    val expandedStateMap = remember { mutableStateMapOf<String, Boolean>().withDefault { true } }
+    val expandedStateMap = remember { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(highlightedSessionId, highlightedDateHeader) {
         if (highlightedSessionId != null || highlightedDateHeader != null) {
@@ -84,112 +89,81 @@ fun SleepSessionList(
         }
     }
 
+    // Default collapse older than 7 days
+    val sevenDaysAgo = remember {
+        Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.time
+    }
+    LaunchedEffect(sessions) {
+        groupedSessions.keys.forEach { dateStr ->
+            if (!expandedStateMap.containsKey(dateStr)) {
+                val groupDate = try { headerDateFormatter.parse(dateStr) } catch (e: Exception) { null } ?: Date()
+                expandedStateMap[dateStr] = !groupDate.before(sevenDaysAgo)
+            }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent,
             floatingActionButton = {
-                FloatingActionButton(onClick = {
-                    sessionToEdit = null
-                    showAddDialog = true
-                }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Sleep Session")
+                FloatingActionButton(
+                    onClick = {
+                        sessionToEdit = null
+                        showAddDialog = true
+                    },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add")
                 }
             }
         ) { innerPadding ->
             Column(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
                 if (sessions.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Lock your phone near bedtime to record sleep.")
+                        Text("No logs found.")
                     }
                 } else {
-                    val headerDateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                    val groupedSessions = sessions.groupBy { headerDateFormatter.format(it.startTimeMillis) }
-
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 80.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
                     ) {
                         item { 
                             StatsSection(
                                 sessions = sessions, 
                                 repository = repository,
-                                onStatusClick = onNavigateToModelLab 
+                                onStatusClick = onNavigateToModelLab,
+                                onSettingsClick = onNavigateToSettings
                             ) 
                         }
 
-                        item { 
-                            VisualizationPager(
-                                sessions = sessions,
-                                onSessionClick = { session ->
-                                    val dateHeader = headerDateFormatter.format(session.startTimeMillis)
-                                    expandedStateMap[dateHeader] = true
-                                    highlightedSessionId = session.id
-                                    
-                                    scope.launch {
-                                        var targetIndex = 3 // Offset for Stats, Chart, Divider
-                                        for (entry in groupedSessions) {
-                                            if (entry.key == dateHeader) {
-                                                val sessionIdx = entry.value.indexOfFirst { it.id == session.id }
-                                                if (sessionIdx != -1) {
-                                                    targetIndex += sessionIdx + 1
-                                                    listState.animateScrollToItem(targetIndex)
-                                                }
-                                                break
-                                            }
-                                            targetIndex += 1
-                                            if (expandedStateMap.getValue(entry.key)) {
-                                                targetIndex += entry.value.size
-                                            }
-                                        }
-                                    }
-                                },
-                                onDayClick = { dayStartMillis ->
-                                    val dateHeader = headerDateFormatter.format(dayStartMillis)
-                                    expandedStateMap[dateHeader] = true
-                                    highlightedDateHeader = dateHeader
-                                    
-                                    scope.launch {
-                                        var targetIndex = 3
-                                        for (entry in groupedSessions) {
-                                            if (entry.key == dateHeader) {
-                                                listState.animateScrollToItem(targetIndex)
-                                                break
-                                            }
-                                            targetIndex += 1
-                                            if (expandedStateMap.getValue(entry.key)) {
-                                                targetIndex += entry.value.size
-                                            }
-                                        }
-                                    }
-                                }
-                            ) 
-                        }
-                        item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp, horizontal = 16.dp)) }
+                        item { Spacer(Modifier.height(2.dp)) }
 
                         groupedSessions.forEach { (dateHeader, sessionsForDate) ->
                             stickyHeader {
                                 val isHeaderHighlighted = highlightedDateHeader == dateHeader
+                                val isExpanded = expandedStateMap[dateHeader] ?: true
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(if (isHeaderHighlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
-                                        .clickable { expandedStateMap[dateHeader] = !expandedStateMap.getValue(dateHeader) }
-                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                        .clickable { expandedStateMap[dateHeader] = !isExpanded }
+                                        .padding(horizontal = 16.dp, vertical = 1.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(text = dateHeader, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                                    Text(text = dateHeader, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                                     Icon(
-                                        imageVector = if (expandedStateMap.getValue(dateHeader)) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
-                                        contentDescription = if (expandedStateMap.getValue(dateHeader)) "Toggle Collapse" else "Toggle Expand"
+                                        imageVector = if (isExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
-                            if (expandedStateMap.getValue(dateHeader)) {
+                            if (expandedStateMap[dateHeader] == true) {
                                 items(sessionsForDate, key = { it.id }) { session ->
-                                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                                    Box(modifier = Modifier.padding(horizontal = 0.dp)) { // Edge-to-edge
                                         SleepLogRow(
                                             session = session,
                                             isHighlighted = highlightedSessionId == session.id,
@@ -203,18 +177,6 @@ fun SleepSessionList(
                     }
                 }
             }
-        }
-
-        IconButton(
-            onClick = onNavigateToSettings,
-            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                modifier = Modifier.size(48.dp)
-            )
         }
     }
 }
@@ -233,7 +195,7 @@ fun SleepLogRow(
     fun formatDuration(totalSeconds: Long): String {
         val hours = totalSeconds / 3600
         val minutes = (totalSeconds % 3600) / 60
-        return "${hours}h ${minutes}m"
+        return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
     }
 
     val (icon, tint) = when (category) {
@@ -246,39 +208,46 @@ fun SleepLogRow(
     val containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer else baseColor
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().height(40.dp), // Compressed height
+        shape = RoundedCornerShape(0.dp), // Edge-to-edge look
         colors = CardDefaults.cardColors(containerColor = containerColor),
         onClick = onEditClick
     ) {
         Row(
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(12.dp))
+            // LEFT: Icon
+            Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
             
+            Spacer(Modifier.width(16.dp))
+
+            // CENTER: Time + Category
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "${timeFormatter.format(session.startTimeMillis)} — ${timeFormatter.format(session.endTimeMillis)}",
-                    style = MaterialTheme.typography.bodyLarge
+                    text = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = category.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() },
+                    text = category,
                     style = MaterialTheme.typography.labelSmall,
                     color = tint,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 8.sp
                 )
             }
 
+            // RIGHT: Duration + Delete
             Text(
                 text = formatDuration(session.durationSeconds),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall,
+                fontSize = 10.sp,
                 modifier = Modifier.padding(horizontal = 8.dp)
             )
 
-            IconButton(onClick = onDeleteClick) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            IconButton(onClick = onDeleteClick, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
             }
         }
     }

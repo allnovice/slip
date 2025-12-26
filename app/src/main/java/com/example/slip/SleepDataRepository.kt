@@ -24,21 +24,22 @@ class SleepDataRepository private constructor(
 
     val userSettings: Flow<UserSettings> = dataStore.data.map { preferences ->
         val bedtime = preferences[PreferencesKeys.BASE_BEDTIME] ?: "22:00"
-        val offDaysStr = preferences[PreferencesKeys.OFF_DAYS] ?: "7,1" // Default Sat, Sun
-        
-        val offDaysSet = offDaysStr.split(",")
-            .filter { it.isNotEmpty() }
-            .map { it.toInt() }
-            .toSet()
-
-        UserSettings(
-            UserTime.fromString(bedtime),
-            offDaysSet
-        )
+        val offDaysStr = preferences[PreferencesKeys.OFF_DAYS] ?: "7,1"
+        val offDaysSet = offDaysStr.split(",").filter { it.isNotEmpty() }.map { it.toInt() }.toSet()
+        UserSettings(UserTime.fromString(bedtime), offDaysSet)
     }
 
-    val filterDuration: Flow<Float> = dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.FILTER_DURATION] ?: 0f
+    val statsScrollPosition: Flow<Int> = dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.STATS_SCROLL_POSITION] ?: 0
+    }
+
+    // Stores a map of "MetricName:Index" for independent swiping
+    val statsPeriods: Flow<Map<String, Int>> = dataStore.data.map { preferences ->
+        val raw = preferences[PreferencesKeys.STATS_PERIODS_MAP] ?: ""
+        raw.split(",").filter { it.contains(":") }.associate {
+            val parts = it.split(":")
+            parts[0] to (parts[1].toIntOrNull() ?: 0)
+        }
     }
 
     val useUserMlModel: Flow<Boolean> = dataStore.data.map { preferences ->
@@ -75,15 +76,11 @@ class SleepDataRepository private constructor(
     }
 
     fun addSleepSession(session: SleepSession) {
-        CoroutineScope(Dispatchers.IO).launch {
-            sleepSessionDao.insert(session)
-        }
+        CoroutineScope(Dispatchers.IO).launch { sleepSessionDao.insert(session) }
     }
 
     fun deleteSession(session: SleepSession) {
-        CoroutineScope(Dispatchers.IO).launch {
-            sleepSessionDao.delete(session)
-        }
+        CoroutineScope(Dispatchers.IO).launch { sleepSessionDao.delete(session) }
     }
 
     fun editSession(session: SleepSession, newStart: Long, newEnd: Long, category: String) {
@@ -98,17 +95,10 @@ class SleepDataRepository private constructor(
         }
     }
 
-    fun labelSession(session: SleepSession, category: String) {
+    fun labelSessionById(id: String, category: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            val updatedSession = session.copy(category = category)
-            sleepSessionDao.update(updatedSession)
-        }
-    }
-
-    suspend fun labelSessionById(id: String, category: String) {
-        val session = sleepSessionDao.getSessionById(id)
-        session?.let {
-            sleepSessionDao.update(it.copy(category = category))
+            val session = sleepSessionDao.getSessionById(id)
+            session?.let { sleepSessionDao.update(it.copy(category = category)) }
         }
     }
 
@@ -119,10 +109,27 @@ class SleepDataRepository private constructor(
         }
     }
 
-    suspend fun setUseUserMlModel(use: Boolean) {
+    suspend fun saveStatsScrollPosition(position: Int) {
+        dataStore.edit { preferences -> preferences[PreferencesKeys.STATS_SCROLL_POSITION] = position }
+    }
+
+    suspend fun saveStatsPeriod(metric: String, index: Int) {
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.USE_USER_ML_MODEL] = use
+            val currentRaw = preferences[PreferencesKeys.STATS_PERIODS_MAP] ?: ""
+            val currentMap = currentRaw.split(",")
+                .filter { it.contains(":") }
+                .associate {
+                    val parts = it.split(":")
+                    parts[0] to parts[1]
+                }.toMutableMap()
+            
+            currentMap[metric] = index.toString()
+            preferences[PreferencesKeys.STATS_PERIODS_MAP] = currentMap.entries.joinToString(",") { "${it.key}:${it.value}" }
         }
+    }
+
+    suspend fun setUseUserMlModel(use: Boolean) {
+        dataStore.edit { preferences -> preferences[PreferencesKeys.USE_USER_ML_MODEL] = use }
     }
 
     suspend fun saveUserMlStats(mean: Float, std: Float) {
@@ -133,19 +140,11 @@ class SleepDataRepository private constructor(
     }
 
     suspend fun setMonitoringEnabled(enabled: Boolean) {
-        dataStore.edit { preferences ->
-            preferences[PreferencesKeys.IS_MONITORING_ENABLED] = enabled
-        }
+        dataStore.edit { preferences -> preferences[PreferencesKeys.IS_MONITORING_ENABLED] = enabled }
     }
 
     suspend fun setSleepTargetHours(hours: Int) {
-        dataStore.edit { preferences ->
-            preferences[PreferencesKeys.SLEEP_TARGET_HOURS] = hours
-        }
-    }
-
-    suspend fun backfillCustomPredictions(context: Context, path: String, mean: Float, std: Float) {
-        // Predictions computed on the fly now
+        dataStore.edit { preferences -> preferences[PreferencesKeys.SLEEP_TARGET_HOURS] = hours }
     }
 
     suspend fun saveUserMlModel(context: Context, uri: Uri): String? {
@@ -154,26 +153,21 @@ class SleepDataRepository private constructor(
                 val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
                 val file = File(context.filesDir, "user_model.tflite")
                 val outputStream = FileOutputStream(file)
-                inputStream.use { input ->
-                    outputStream.use { output ->
-                        input.copyTo(output)
-                    }
-                }
+                inputStream.use { input -> outputStream.use { output -> input.copyTo(output) } }
                 val path = file.absolutePath
-                dataStore.edit { preferences ->
-                    preferences[PreferencesKeys.USER_ML_MODEL_PATH] = path
-                }
+                dataStore.edit { preferences -> preferences[PreferencesKeys.USER_ML_MODEL_PATH] = path }
                 path
-            } catch (_: Exception) {
-                null
-            }
+            } catch (_: Exception) { null }
         }
     }
+
+    suspend fun backfillCustomPredictions(context: Context, path: String, mean: Float, std: Float) { }
 
     private object PreferencesKeys {
         val BASE_BEDTIME = stringPreferencesKey("base_bedtime")
         val OFF_DAYS = stringPreferencesKey("off_days")
-        val FILTER_DURATION = floatPreferencesKey("filter_duration")
+        val STATS_SCROLL_POSITION = intPreferencesKey("stats_scroll_position")
+        val STATS_PERIODS_MAP = stringPreferencesKey("stats_periods_map")
         val USE_USER_ML_MODEL = booleanPreferencesKey("use_user_ml_model")
         val USER_ML_MODEL_PATH = stringPreferencesKey("user_ml_model_path")
         val USER_ML_MEAN = floatPreferencesKey("user_ml_mean")
@@ -183,18 +177,13 @@ class SleepDataRepository private constructor(
     }
 
     companion object {
-        @Volatile
-        private var INSTANCE: SleepDataRepository? = null
-
+        @Volatile private var INSTANCE: SleepDataRepository? = null
         fun getInstance(context: Context): SleepDataRepository {
-            synchronized(this) {
-                var instance = INSTANCE
-                if (instance == null) {
-                    val database = AppDatabase.getInstance(context)
-                    instance = SleepDataRepository(database.sleepSessionDao(), context.dataStore)
-                    INSTANCE = instance
-                }
-                return instance
+            return INSTANCE ?: synchronized(this) {
+                val database = AppDatabase.getInstance(context)
+                val instance = SleepDataRepository(database.sleepSessionDao(), context.dataStore)
+                INSTANCE = instance
+                instance
             }
         }
     }
