@@ -111,6 +111,7 @@ fun SleepSessionList(
                     val headerDateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
                     val groupedSessions = sessions.groupBy { headerDateFormatter.format(it.startTimeMillis) }
 
+                    // Default collapse older than 7 days
                     val sevenDaysAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }.time
                     groupedSessions.keys.forEach { dateStr ->
                         if (!expandedStateMap.containsKey(dateStr)) {
@@ -158,7 +159,7 @@ fun SleepSessionList(
                             }
                             if (expandedStateMap[dateHeader] == true) {
                                 items(sessionsForDate, key = { it.id }) { session ->
-                                    Box(modifier = Modifier.padding(horizontal = 0.dp)) {
+                                    Box(modifier = Modifier.padding(horizontal = 8.dp)) {
                                         SleepLogRow(
                                             session = session,
                                             isHighlighted = highlightedSessionId == session.id,
@@ -203,24 +204,24 @@ fun SleepLogRow(
     val containerColor = if (isHighlighted) MaterialTheme.colorScheme.primaryContainer else baseColor
 
     Card(
-        modifier = Modifier.fillMaxWidth().height(52.dp), // Increased height for larger fonts
-        shape = RoundedCornerShape(0.dp),
+        modifier = Modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         onClick = onEditClick
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // LEFT: Icon + Label Stacked
+            // LEFT: Icon + Label
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(56.dp)
+                modifier = Modifier.width(54.dp)
             ) {
                 Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
                 Text(
                     text = category,
-                    fontSize = 10.sp, // Larger font
+                    fontSize = 8.sp,
                     fontWeight = FontWeight.Bold,
                     color = tint
                 )
@@ -234,14 +235,14 @@ fun SleepLogRow(
                 Text(
                     text = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}",
                     style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 14.sp, // Larger font
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp
                 )
                 Text(
                     text = formatDuration(session.durationSeconds),
                     style = MaterialTheme.typography.labelSmall,
-                    fontSize = 12.sp, // Larger font
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                 )
             }
 
