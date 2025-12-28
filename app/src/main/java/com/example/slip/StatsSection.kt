@@ -41,8 +41,6 @@ fun StatsSection(
     if (sessions.isEmpty()) return
 
     val scope = rememberCoroutineScope()
-    val totalHistory = sessions.size
-    
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
     val useUserMl by repository.useUserMlModel.collectAsState(initial = false)
     val modelFileExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
@@ -50,10 +48,9 @@ fun StatsSection(
 
     val targetHours by repository.sleepTargetHours.collectAsState(initial = 7)
     val initialScrollPos by repository.statsScrollPosition.collectAsState(initial = 0)
-    val savedPeriodIndex by repository.statsPeriodIndex.collectAsState(initial = 0)
+    val savedPeriods by repository.statsPeriods.collectAsState(initial = emptyMap())
     
     val scrollState = rememberScrollState()
-    val globalPagerState = rememberPagerState(initialPage = savedPeriodIndex, pageCount = { 3 })
     
     LaunchedEffect(initialScrollPos) {
         if (scrollState.value == 0 && initialScrollPos > 0) scrollState.scrollTo(initialScrollPos)
@@ -61,10 +58,6 @@ fun StatsSection(
 
     LaunchedEffect(scrollState) {
         snapshotFlow { scrollState.value }.debounce(500).collectLatest { repository.saveStatsScrollPosition(it) }
-    }
-
-    LaunchedEffect(globalPagerState.currentPage) {
-        repository.saveStatsPeriodIndex(globalPagerState.currentPage % 3)
     }
 
     // --- PERIOD CALCULATIONS ---
@@ -116,7 +109,6 @@ fun StatsSection(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // --- ROW 1: CARDS ---
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState).padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -131,11 +123,19 @@ fun StatsSection(
 
             listOf("Routine", "Avg Sleep", "Avg Wake", "Avg Nap", "Shortest", "Longest").forEach { key ->
                 val units = mapOf("Routine" to "score", "Avg Sleep" to "hrs", "Avg Nap" to "hrs", "Shortest" to "hrs", "Longest" to "hrs")
-                SwipableStatCard(label = key, val7d = stats7d[key] ?: "--", val30d = stats30d[key] ?: "--", valAll = statsAll[key] ?: "--", unit = units[key] ?: "", pagerState = globalPagerState)
+                val savedIndex = savedPeriods[key] ?: 0
+                SwipableStatCard(
+                    label = key, 
+                    val7d = stats7d[key] ?: "--", 
+                    val30d = stats30d[key] ?: "--", 
+                    valAll = statsAll[key] ?: "--", 
+                    unit = units[key] ?: "", 
+                    initialPage = savedIndex,
+                    onPageChange = { newPage -> scope.launch { repository.saveStatsPeriod(key, newPage) } }
+                )
             }
         }
 
-        // --- ROW 2: VISUAL TRENDS (Heatmap) ---
         Box(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
             SleepContributionGraph(sessions)
         }
@@ -144,7 +144,23 @@ fun StatsSection(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwipableStatCard(label: String, val7d: String, val30d: String, valAll: String, unit: String, pagerState: androidx.compose.foundation.pager.PagerState) {
+private fun SwipableStatCard(
+    label: String, 
+    val7d: String, 
+    val30d: String, 
+    valAll: String, 
+    unit: String, 
+    initialPage: Int,
+    onPageChange: (Int) -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { 3 })
+    
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage != initialPage) {
+            onPageChange(pagerState.currentPage)
+        }
+    }
+
     Card(modifier = Modifier.size(width = 80.dp, height = 70.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(modifier = Modifier.fillMaxSize().padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)

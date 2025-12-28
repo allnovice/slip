@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,12 +56,13 @@ class SleepTrackingService : Service() {
 
             // Skip anything less than 1 hour
             if (seconds < 3600) {
+                Log.d("SleepTrackingService", "Session too short ($seconds s). Discarding.")
                 startTime = 0L
                 super.onDestroy()
                 return
             }
 
-            val finalResult = runBlocking(Dispatchers.IO) {
+            val result = runBlocking(Dispatchers.IO) {
                 val settings: UserSettings = repository.userSettings.first()
                 val customPath: String? = repository.userMlModelPath.first()
                 val customMean: Float = repository.userMlMean.first()
@@ -68,30 +70,39 @@ class SleepTrackingService : Service() {
                 
                 val targetHour = settings.getTargetHourFor(startTime)
 
+                // 1. Calculate PURE Heuristic (Dumb Model / The Standard)
+                val heuristicClassifier = HeuristicClassifier(settings)
+                val rawHeuristic = heuristicClassifier.classify(startTime, seconds, targetHour)
+
+                // 2. Calculate ML Engine Result (The Competitor)
                 val engine = ModelLabEngine(
                     settings = settings,
                     customPath = customPath,
                     customMean = customMean,
                     customStd = customStd
                 )
+                val mlGuess = engine.runAll(startTime, seconds, targetHour)
                 
-                val category = engine.runAll(startTime, seconds, targetHour)
-                Pair<String, Int>(category, targetHour)
+                Log.d("SleepTrackingService", "Session End. Standard (Base): $rawHeuristic, ML Competitor: $mlGuess")
+                
+                Triple(mlGuess, rawHeuristic, targetHour)
             }
             
+            // Per design: Both Truth and Base start with the Rules (The Standard)
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
                 durationSeconds = seconds,
-                category = finalResult.first,
-                heuristicCategory = finalResult.first,
-                targetBedtimeHour = finalResult.second
+                category = result.second,          // TRUTH starts as Base Rules
+                heuristicCategory = result.second, // BASE is always the Rules
+                targetBedtimeHour = result.third
             )
 
             repository.addSleepSession(session)
 
-            // IF CATEGORY IS NAP, SEND INTERACTIVE NOTIFICATION
-            if (finalResult.first == SleepSession.CATEGORY_NAP) {
+            // Trigger Nap Notification if EITHER the Standard or the ML detects a nap
+            // This allows the ML to "work on its own" to help the user find naps the rules missed.
+            if (result.first == SleepSession.CATEGORY_NAP || result.second == SleepSession.CATEGORY_NAP) {
                 sendNapConfirmationNotification(session)
             }
         }
