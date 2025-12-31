@@ -1,6 +1,7 @@
 package com.example.slip
 
 import android.content.Context
+import android.util.Log
 import org.tensorflow.lite.Interpreter
 import java.io.File
 import java.util.Calendar
@@ -21,23 +22,25 @@ class HeuristicClassifier(private val settings: UserSettings) : SleepClassifier 
         if (startOffset < -12) startOffset += 24
         if (startOffset > 12) startOffset -= 24
 
-        return when {
-            // 1. SLEEP: Long duration and starts in window (-2h to +4h)
-            // Example: Bedtime 10PM -> Window 8PM to 2AM
-            hours >= 4.0 && startOffset >= -2.0 && startOffset <= 4.0 -> {
+        val result = when {
+            // 1. SLEEP: Long duration and starts in window (-2h to +5h)
+            // Example: Bedtime 10PM -> Window 8PM to 3AM
+            hours >= 4.0 && startOffset >= -2.0 && startOffset <= 5.0 -> {
                 SleepSession.CATEGORY_SLEEP
             }
 
-            // 2. NAP: Starts in afternoon window (5 to 10 hours BEFORE bedtime)
-            // Example: Bedtime 10PM -> Window 12PM to 5PM
-            // Removed: "hours < 4.0" check to avoid contradiction with IDLE
-            startOffset >= -10.0 && startOffset <= -5.0 -> {
+            // 2. NAP: Starts in afternoon window (Starts 5 to 11 hours BEFORE bedtime)
+            // Example: Bedtime 10PM -> Window 11AM to 5PM
+            startOffset >= -11.0 && startOffset <= -5.0 -> {
                 SleepSession.CATEGORY_NAP
             }
 
-            // 3. IDLE: Anything else (including short night sessions or morning junk)
+            // 3. IDLE: Anything else
             else -> SleepSession.CATEGORY_IDLE
         }
+        
+        Log.d("HeuristicClassifier", "Classification: Offset=$startOffset, Hours=$hours, TargetHr=$targetHour -> Result=$result")
+        return result
     }
 }
 
@@ -46,6 +49,7 @@ class UserCustomClassifier(
     private val durationMean: Float?,
     private val durationStd: Float?
 ) : SleepClassifier {
+    // Keep the interpreter as a member to avoid recreating it 50x in a loop
     private var interpreter: Interpreter? = null
     var inputFeatureCount: Int = 0
     var outputClassCount: Int = 0
@@ -60,7 +64,9 @@ class UserCustomClassifier(
                     outputClassCount = it.getOutputTensor(0).shape()[1]
                 }
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) { 
+            Log.e("UserCustomClassifier", "Failed to init TFLite: ${e.message}")
+        }
     }
 
     fun isValid(): Boolean {
@@ -121,6 +127,11 @@ class UserCustomClassifier(
             else -> SleepSession.CATEGORY_IDLE
         }
     }
+    
+    fun close() {
+        interpreter?.close()
+        interpreter = null
+    }
 }
 
 class ModelLabEngine(
@@ -129,13 +140,17 @@ class ModelLabEngine(
     private val customMean: Float?,
     private val customStd: Float?
 ) {
+    // Reuse a single classifier instance for the life of this Engine
+    private val customClassifier: UserCustomClassifier? by lazy {
+        if (customPath != null) UserCustomClassifier(customPath, customMean, customStd) else null
+    }
+
     fun runAll(startTimeMillis: Long, durationSeconds: Long, targetHour: Int): String {
         val heuristic = HeuristicClassifier(settings).classify(startTimeMillis, durationSeconds, targetHour)
-        if (customPath != null) {
-            val custom = UserCustomClassifier(customPath, customMean, customStd)
-            val mlResult = custom.classify(startTimeMillis, durationSeconds, targetHour)
-            if (mlResult != null) return mlResult
-        }
+        
+        val mlResult = customClassifier?.classify(startTimeMillis, durationSeconds, targetHour)
+        if (mlResult != null) return mlResult
+        
         return heuristic
     }
 }

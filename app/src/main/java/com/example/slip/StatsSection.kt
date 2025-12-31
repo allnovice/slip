@@ -122,14 +122,12 @@ fun StatsSection(
             })
 
             listOf("Routine", "Avg Sleep", "Avg Wake", "Avg Nap", "Shortest", "Longest").forEach { key ->
-                val units = mapOf("Routine" to "score", "Avg Sleep" to "hrs", "Avg Nap" to "hrs", "Shortest" to "hrs", "Longest" to "hrs")
                 val savedIndex = savedPeriods[key] ?: 0
                 SwipableStatCard(
                     label = key, 
                     val7d = stats7d[key] ?: "--", 
                     val30d = stats30d[key] ?: "--", 
                     valAll = statsAll[key] ?: "--", 
-                    unit = units[key] ?: "", 
                     initialPage = savedIndex,
                     onPageChange = { newPage -> scope.launch { repository.saveStatsPeriod(key, newPage) } }
                 )
@@ -149,7 +147,6 @@ private fun SwipableStatCard(
     val7d: String, 
     val30d: String, 
     valAll: String, 
-    unit: String, 
     initialPage: Int,
     onPageChange: (Int) -> Unit
 ) {
@@ -162,16 +159,15 @@ private fun SwipableStatCard(
     }
 
     Card(modifier = Modifier.size(width = 80.dp, height = 70.dp), shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(modifier = Modifier.fillMaxSize().padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            VerticalPager(state = pagerState, modifier = Modifier.height(32.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { page ->
+            VerticalPager(state = pagerState, modifier = Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { page ->
                 val (value, period) = when(page % 3) { 0 -> val7d to "7d"; 1 -> val30d to "30d"; else -> valAll to "All" }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1)
-                    Text(period, style = MaterialTheme.typography.labelSmall, fontSize = 7.sp, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.fillMaxSize()) {
+                    Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, fontSize = 18.sp, maxLines = 1)
+                    Text(period, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f))
                 }
             }
-            if (unit.isNotEmpty()) Text(unit, style = MaterialTheme.typography.labelSmall, fontSize = 8.sp)
         }
     }
 }
