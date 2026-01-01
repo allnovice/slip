@@ -74,7 +74,7 @@ class SleepTrackingService : Service() {
                 val heuristicClassifier = HeuristicClassifier(settings)
                 val rawHeuristic = heuristicClassifier.classify(startTime, seconds, targetHour)
 
-                // 2. Calculate ML Engine Result (The Competitor)
+                // 2. Calculate ML Engine Result (The Competitor - for logging/lab only)
                 val engine = ModelLabEngine(
                     settings = settings,
                     customPath = customPath,
@@ -88,7 +88,7 @@ class SleepTrackingService : Service() {
                 Triple(mlGuess, rawHeuristic, targetHour)
             }
             
-            // Per design: Both Truth and Base start with the Rules (The Standard)
+            // Truth and Base both start with the Rules (The Standard)
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
@@ -100,9 +100,9 @@ class SleepTrackingService : Service() {
 
             repository.addSleepSession(session)
 
-            // Trigger Nap Notification if EITHER the Standard or the ML detects a nap
-            // This allows the ML to "work on its own" to help the user find naps the rules missed.
-            if (result.first == SleepSession.CATEGORY_NAP || result.second == SleepSession.CATEGORY_NAP) {
+            // ONLY trigger Nap Notification if the Standard (Rules) detects a nap.
+            // This ensures the notification is confirming the database's initial state.
+            if (result.second == SleepSession.CATEGORY_NAP) {
                 sendNapConfirmationNotification(session)
             }
         }

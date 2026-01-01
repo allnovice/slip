@@ -1,6 +1,7 @@
 package com.example.slip
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -18,11 +19,17 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val repository = SleepDataRepository.getInstance(context.applicationContext)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
+        // Create an intent to open the app (MainActivity)
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
         when (action) {
             "ACTION_CONFIRM_NAP" -> {
                 Log.d("NotifyReceiver", "User confirmed NAP for $sessionId")
-                // No database change needed as it's already tagged as NAP
+                // No database change needed as it's already tagged as NAP by standard rules
                 notificationManager.cancel(notificationId)
+                context.startActivity(openAppIntent)
             }
             "ACTION_MARK_IDLE" -> {
                 Log.d("NotifyReceiver", "User marked $sessionId as IDLE")
@@ -30,6 +37,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     repository.labelSessionById(sessionId, SleepSession.CATEGORY_IDLE)
                 }
                 notificationManager.cancel(notificationId)
+                context.startActivity(openAppIntent)
             }
         }
     }
