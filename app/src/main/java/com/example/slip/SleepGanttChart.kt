@@ -27,13 +27,14 @@ fun SleepContributionGraph(
 
     val daysData = remember(sessions, selectedYear) {
         val sleepSessions = sessions.filter { it.category == SleepSession.CATEGORY_SLEEP }
+        val napSessions = sessions.filter { it.category == SleepSession.CATEGORY_NAP }
+
         val calendar = Calendar.getInstance().apply {
             set(Calendar.YEAR, selectedYear)
             set(Calendar.MONTH, Calendar.JANUARY)
             set(Calendar.DAY_OF_MONTH, 1)
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }
-        // Align to the first Sunday to start the grid properly
         while (calendar.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) calendar.add(Calendar.DAY_OF_YEAR, -1)
         
         List(53 * 7) {
@@ -44,14 +45,18 @@ fun SleepContributionGraph(
                 val oE = min(s.endTimeMillis, end)
                 if (oS < oE) (oE - oS) / 1000 else 0L
             }
-            val result = start to sleepSecs
+            val hasNap = napSessions.any { s ->
+                val oS = max(s.startTimeMillis, start)
+                val oE = min(s.endTimeMillis, end)
+                oS < oE
+            }
+            val result = Triple(start, sleepSecs, hasNap)
             calendar.add(Calendar.DAY_OF_YEAR, 1)
             result
         }
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        // --- YEAR SELECTOR ---
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -74,7 +79,6 @@ fun SleepContributionGraph(
             }
         }
 
-        // --- GRID GRAPH ---
         Row(
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -82,11 +86,11 @@ fun SleepContributionGraph(
                 Column(
                     modifier = Modifier.weight(1f)
                 ) {
-                    week.forEach { (dayStart, secs) ->
+                    week.forEach { (dayStart, secs, hasNap) ->
                         val color = when {
                             secs == 0L -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                            secs < 4 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                            secs < 7 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                            secs < 7 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            hasNap -> MaterialTheme.colorScheme.tertiary
                             else -> MaterialTheme.colorScheme.primary
                         }
                         Box(
