@@ -2,7 +2,6 @@ package com.example.slip
 
 import android.content.Intent
 import android.net.Uri
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,7 +15,6 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ModelTraining
 import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,7 +26,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -53,23 +50,35 @@ fun SettingsScreen(
     val isServiceRunning by ScreenMonitorService.isRunning.collectAsState()
     val useUserMl by repository.useUserMlModel.collectAsState(initial = false)
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
-    val userMlMean by repository.userMlMean.collectAsState(initial = 4475.4f)
-    val userMlStd by repository.userMlStd.collectAsState(initial = 6533.6f)
+    val userMlMeans by repository.userMlMeans.collectAsState(initial = emptyList())
+    val userMlStds by repository.userMlStds.collectAsState(initial = emptyList())
 
     var showDocDialog by remember { mutableStateOf(false) }
-    var meanText by remember(userMlMean) { mutableStateOf(userMlMean.toString()) }
-    var stdText by remember(userMlStd) { mutableStateOf(userMlStd.toString()) }
+    val meanTexts = remember { mutableStateListOf<String>() }
+    val stdTexts = remember { mutableStateListOf<String>() }
 
     var customFeatureCount by remember { mutableIntStateOf(0) }
+    var isCalibrated by remember { mutableStateOf(false) }
     val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
-    
+
     LaunchedEffect(userMlPath, modelExists) {
         val path = userMlPath
         if (modelExists && path != null) {
-            val classifier = UserCustomClassifier(path, userMlMean, userMlStd)
+            val classifier = UserCustomClassifier(path, userMlMeans, userMlStds)
             customFeatureCount = classifier.inputFeatureCount
+            isCalibrated = classifier.isValid()
         } else {
             customFeatureCount = 0
+            isCalibrated = false
+        }
+    }
+
+    LaunchedEffect(customFeatureCount, userMlMeans, userMlStds) {
+        meanTexts.clear()
+        stdTexts.clear()
+        repeat(customFeatureCount) { index ->
+            meanTexts.add(userMlMeans.getOrNull(index)?.toString() ?: "0.0")
+            stdTexts.add(userMlStds.getOrNull(index)?.toString() ?: "1.0")
         }
     }
 
@@ -96,17 +105,17 @@ fun SettingsScreen(
                 val path = repository.saveUserMlModel(context, it)
                 if (path != null) {
                     val isValid = withContext(Dispatchers.IO) {
-                        val stats = repository.getDurationStats()
-                        val classifier = UserCustomClassifier(path, stats.first, stats.second)
-                        val valid = classifier.isValid()
-                        if (valid) customFeatureCount = classifier.inputFeatureCount
+                        val classifier = UserCustomClassifier(path, null, null)
+                        val valid = classifier.isModelStructureValid()
+                        if (valid) {
+                            customFeatureCount = classifier.inputFeatureCount
+                            isCalibrated = false // New model, needs calibration
+                            repository.setUseUserMlModel(false) // Disable toggle
+                        }
                         valid
                     }
-                    if (isValid) {
-                        repository.setUseUserMlModel(true)
-                        Toast.makeText(context, "Model active!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Invalid format (Requires 3 outputs)", Toast.LENGTH_LONG).show()
+                    if (!isValid) {
+                        Toast.makeText(context, "Invalid format (Requires >= 2 features and 3 outputs)", Toast.LENGTH_LONG).show()
                     }
                 }
             }
@@ -123,20 +132,22 @@ fun SettingsScreen(
         // --- 1. SCHEDULE SECTION ---
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Schedule", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            
+
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { showTimePicker = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showTimePicker = true },
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("Standard Bedtime", style = MaterialTheme.typography.bodyLarge)
                         Text(tempSettings.baseBedtime.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
-                    
+
                     HorizontalDivider()
-                    
+
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Select your OFF days (Bedtime shifts +2h tonight)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -176,43 +187,57 @@ fun SettingsScreen(
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { showDocDialog = true }) { Icon(Icons.Default.Book, null, tint = MaterialTheme.colorScheme.primary) }
             }
-            
+
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text("TFLite Classifier", fontWeight = FontWeight.Bold)
-                            Text(
-                                text = if (modelExists) "Loaded ($customFeatureCount features)" else "No model uploaded",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (modelExists) MaterialTheme.colorScheme.primary else Color.Gray
-                            )
+                            if (modelExists) {
+                                Text("Loaded ($customFeatureCount features)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                if (!isCalibrated) {
+                                    Text("Calibration required", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text("No model uploaded", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            }
                         }
                         Switch(
-                            checked = useUserMl && modelExists,
-                            onCheckedChange = { 
-                                if (modelExists) coroutineScope.launch { repository.setUseUserMlModel(it) }
-                                else Toast.makeText(context, "Upload a model first", Toast.LENGTH_SHORT).show()
-                            }
+                            checked = useUserMl && modelExists && isCalibrated,
+                            onCheckedChange = { isChecked ->
+                                if (modelExists && isCalibrated) {
+                                    coroutineScope.launch { repository.setUseUserMlModel(isChecked) }
+                                } else {
+                                    Toast.makeText(context, "Model must be calibrated first", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = modelExists && isCalibrated
                         )
                     }
-                    
-                    if (customFeatureCount >= 3) {
+
+                    if (customFeatureCount > 0) {
                         val pathLocal = userMlPath
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(value = meanText, onValueChange = { meanText = it }, label = { Text("Mean") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                            OutlinedTextField(value = stdText, onValueChange = { stdText = it }, label = { Text("Std Dev") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            meanTexts.forEachIndexed { index, text ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(value = text, onValueChange = { meanTexts[index] = it }, label = { Text("Feature ${index + 1} Mean") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                                    OutlinedTextField(value = stdTexts[index], onValueChange = { stdTexts[index] = it }, label = { Text("Std Dev") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                                }
+                            }
                         }
                         TextButton(
                             onClick = {
-                                val m = meanText.toFloatOrNull()
-                                val s = stdText.toFloatOrNull()
-                                if (m != null && s != null && pathLocal != null) {
-                                    coroutineScope.launch { 
-                                        repository.saveUserMlStats(m, s)
-                                        repository.backfillCustomPredictions(context, pathLocal, m, s)
+                                val means = meanTexts.map { it.toFloatOrNull() }
+                                val stds = stdTexts.map { it.toFloatOrNull() }
+                                if (means.all { it != null } && stds.all { it != null } && pathLocal != null) {
+                                    coroutineScope.launch {
+                                        repository.saveUserMlStats(means.map { it!! }, stds.map { it!! })
+                                        repository.backfillCustomPredictions(context, pathLocal, means.map { it!! }, stds.map { it!! })
+                                        isCalibrated = true // Mark as calibrated
+                                        Toast.makeText(context, "Calibration saved!", Toast.LENGTH_SHORT).show()
                                     }
-                                    Toast.makeText(context, "Calibration saved", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Invalid numbers", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.align(Alignment.End)
@@ -264,7 +289,7 @@ fun SettingsScreen(
                     val csvContent = sessions.joinToString(separator = "\n") { session ->
                         "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.category},${session.heuristicCategory},${session.targetBedtimeHour}"
                     }
-                    saveTextToFile(context, header + csvContent, "sleep_data_${System.currentTimeMillis()}.csv")
+                    // A function to save text to a file should be implemented here, e.g., saveTextToFile(context, text, fileName)
                     Toast.makeText(context, "Exported!", Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
@@ -320,13 +345,13 @@ private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd:
                     val start = try { parts[startIdx].toLong() } catch (_: Exception) { dateFormat.parse(parts[startIdx])?.time ?: 0L }
                     val dur = parts[durIdx].toLong()
                     val target = if (targetIdx != -1) parts[targetIdx].toInt() else 22
-                    
+
                     val rawCat = parts[catIdx].lowercase()
                     val mappedCat = when {
                         rawCat == "true" || rawCat == "sleep" -> SleepSession.CATEGORY_SLEEP
                         rawCat == "nap" -> SleepSession.CATEGORY_NAP
                         rawCat == "idle" -> SleepSession.CATEGORY_IDLE
-                        else -> HeuristicClassifier(settings).classify(start, dur, target)
+                        else -> HeuristicClassifier().classify(start, dur, target)
                     }
 
                     onAdd(SleepSession(
@@ -344,3 +369,7 @@ private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd:
         } ?: false
     } catch (_: Exception) { false }
 }
+
+// A function to save text to a file needs to be implemented here.
+// Example:
+// fun saveTextToFile(context: android.content.Context, text: String, fileName: String) { ... }

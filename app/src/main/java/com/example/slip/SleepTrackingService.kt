@@ -65,29 +65,28 @@ class SleepTrackingService : Service() {
             val result = runBlocking(Dispatchers.IO) {
                 val settings: UserSettings = repository.userSettings.first()
                 val customPath: String? = repository.userMlModelPath.first()
-                val customMean: Float = repository.userMlMean.first()
-                val customStd: Float = repository.userMlStd.first()
-                
+                val customMeans: List<Float> = repository.userMlMeans.first()
+                val customStds: List<Float> = repository.userMlStds.first()
+
                 val targetHour = settings.getTargetHourFor(startTime)
 
                 // 1. Calculate PURE Heuristic (Dumb Model / The Standard)
-                val heuristicClassifier = HeuristicClassifier(settings)
+                val heuristicClassifier = HeuristicClassifier()
                 val rawHeuristic = heuristicClassifier.classify(startTime, seconds, targetHour)
 
                 // 2. Calculate ML Engine Result (The Competitor - for logging/lab only)
                 val engine = ModelLabEngine(
-                    settings = settings,
                     customPath = customPath,
-                    customMean = customMean,
-                    customStd = customStd
+                    customMeans = customMeans,
+                    customStds = customStds
                 )
                 val mlGuess = engine.runAll(startTime, seconds, targetHour)
-                
+
                 Log.d("SleepTrackingService", "Session End. Standard (Base): $rawHeuristic, ML Competitor: $mlGuess")
-                
+
                 Triple(mlGuess, rawHeuristic, targetHour)
             }
-            
+
             // Truth and Base both start with the Rules (The Standard)
             val session = SleepSession(
                 startTimeMillis = startTime,
@@ -113,7 +112,7 @@ class SleepTrackingService : Service() {
     private fun sendNapConfirmationNotification(session: SleepSession) {
         val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
         val timeRange = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}"
-        
+
         val confirmIntent = Intent(this, NotificationActionReceiver::class.java).apply {
             action = "ACTION_CONFIRM_NAP"
             putExtra("session_id", session.id)

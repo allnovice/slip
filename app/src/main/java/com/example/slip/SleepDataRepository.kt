@@ -50,12 +50,14 @@ class SleepDataRepository private constructor(
         preferences[PreferencesKeys.USER_ML_MODEL_PATH]
     }
 
-    val userMlMean: Flow<Float> = dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.USER_ML_MEAN] ?: 4475.4f
+    val userMlMeans: Flow<List<Float>> = dataStore.data.map { preferences ->
+        val meansStr = preferences[PreferencesKeys.USER_ML_MEANS] ?: ""
+        if (meansStr.isEmpty()) emptyList() else meansStr.split(",").map { it.toFloat() }
     }
 
-    val userMlStd: Flow<Float> = dataStore.data.map { preferences ->
-        preferences[PreferencesKeys.USER_ML_STD] ?: 6533.6f
+    val userMlStds: Flow<List<Float>> = dataStore.data.map { preferences ->
+        val stdsStr = preferences[PreferencesKeys.USER_ML_STDS] ?: ""
+        if (stdsStr.isEmpty()) emptyList() else stdsStr.split(",").map { it.toFloat() }
     }
 
     val isMonitoringEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
@@ -132,10 +134,10 @@ class SleepDataRepository private constructor(
         dataStore.edit { preferences -> preferences[PreferencesKeys.USE_USER_ML_MODEL] = use }
     }
 
-    suspend fun saveUserMlStats(mean: Float, std: Float) {
+    suspend fun saveUserMlStats(means: List<Float>, stds: List<Float>) {
         dataStore.edit { preferences ->
-            preferences[PreferencesKeys.USER_ML_MEAN] = mean
-            preferences[PreferencesKeys.USER_ML_STD] = std
+            preferences[PreferencesKeys.USER_ML_MEANS] = means.joinToString(",")
+            preferences[PreferencesKeys.USER_ML_STDS] = stds.joinToString(",")
         }
     }
 
@@ -161,7 +163,7 @@ class SleepDataRepository private constructor(
         }
     }
 
-    suspend fun backfillCustomPredictions(context: Context, path: String, mean: Float, std: Float) { }
+    suspend fun backfillCustomPredictions(context: Context, path: String, means: List<Float>, stds: List<Float>) { }
 
     private object PreferencesKeys {
         val BASE_BEDTIME = stringPreferencesKey("base_bedtime")
@@ -170,8 +172,8 @@ class SleepDataRepository private constructor(
         val STATS_PERIODS_MAP = stringPreferencesKey("stats_periods_map")
         val USE_USER_ML_MODEL = booleanPreferencesKey("use_user_ml_model")
         val USER_ML_MODEL_PATH = stringPreferencesKey("user_ml_model_path")
-        val USER_ML_MEAN = floatPreferencesKey("user_ml_mean")
-        val USER_ML_STD = floatPreferencesKey("user_ml_std")
+        val USER_ML_MEANS = stringPreferencesKey("user_ml_means")
+        val USER_ML_STDS = stringPreferencesKey("user_ml_stds")
         val IS_MONITORING_ENABLED = booleanPreferencesKey("is_monitoring_enabled")
         val SLEEP_TARGET_HOURS = intPreferencesKey("sleep_target_hours")
     }

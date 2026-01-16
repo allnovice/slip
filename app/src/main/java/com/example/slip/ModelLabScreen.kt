@@ -30,28 +30,27 @@ fun ModelLabScreen(
 ) {
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
     val useUserMl by repository.useUserMlModel.collectAsState(initial = false)
-    val userMlMean by repository.userMlMean.collectAsState(initial = 0f)
-    val userMlStd by repository.userMlStd.collectAsState(initial = 1f)
+    val userMlMeans by repository.userMlMeans.collectAsState(initial = emptyList())
+    val userMlStds by repository.userMlStds.collectAsState(initial = emptyList())
     val userSettings by repository.userSettings.collectAsState(initial = UserSettings.default)
-    
+
     val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
-    
+
     // MASTER UI SWITCH: Only show ML if it exists AND is toggled ON
     val showMlData = modelExists && useUserMl
 
-    val evaluationResults = remember(sessions, userMlPath, showMlData, userMlMean, userMlStd, userSettings) {
+    val evaluationResults = remember(sessions, userMlPath, showMlData, userMlMeans, userMlStds, userSettings) {
         val engine = ModelLabEngine(
-            settings = userSettings,
             customPath = if (showMlData) userMlPath else null,
-            customMean = userMlMean,
-            customStd = userMlStd
+            customMeans = userMlMeans,
+            customStds = userMlStds
         )
-        
+
         sessions.map { session ->
             val mlPred = if (showMlData) {
                 engine.runAll(session.startTimeMillis, session.durationSeconds, session.targetBedtimeHour)
             } else null
-            
+
             session to mlPred
         }
     }
@@ -79,7 +78,9 @@ fun ModelLabScreen(
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -124,7 +125,7 @@ private fun AccuracyCard(title: String, subtitle: String, value: String, isActiv
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = if (isPrimary) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) 
+            containerColor = if (isPrimary) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
             else MaterialTheme.colorScheme.surfaceVariant
         )
     ) {
@@ -157,22 +158,24 @@ private fun TableHeader(showMl: Boolean) {
 @Composable
 private fun ComparisonRow(session: SleepSession, mlPred: String?) {
     val timeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-    
+
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1.2f)) {
             Text(text = timeFormatter.format(session.startTimeMillis), fontSize = 9.sp, fontWeight = FontWeight.Bold)
             Text(text = "${session.durationSeconds / 3600}h ${ (session.durationSeconds % 3600) / 60}m", fontSize = 8.sp, color = Color.Gray)
         }
-        
+
         CategoryResultIcon(session.heuristicCategory, Modifier.weight(0.8f))
-        
+
         if (mlPred != null) {
             CategoryResultIcon(mlPred, Modifier.weight(0.8f))
         }
-        
+
         CategoryResultIcon(session.category, Modifier.weight(0.8f), isTruth = true)
     }
 }
@@ -180,9 +183,9 @@ private fun ComparisonRow(session: SleepSession, mlPred: String?) {
 @Composable
 private fun CategoryResultIcon(category: String, modifier: Modifier, isTruth: Boolean = false) {
     val (icon, color) = when (category) {
-        SleepSession.CATEGORY_SLEEP -> Icons.Default.CheckCircle to Color(0xFF4CAF50) 
-        SleepSession.CATEGORY_NAP -> Icons.Default.Psychology to Color(0xFF2196F3)   
-        else -> Icons.Default.Cancel to Color(0xFFE91E63)                             
+        SleepSession.CATEGORY_SLEEP -> Icons.Default.CheckCircle to Color(0xFF4CAF50)
+        SleepSession.CATEGORY_NAP -> Icons.Default.Psychology to Color(0xFF2196F3)
+        else -> Icons.Default.Cancel to Color(0xFFE91E63)
     }
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
