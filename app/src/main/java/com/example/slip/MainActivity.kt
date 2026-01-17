@@ -1,6 +1,7 @@
 package com.example.slip
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -16,15 +17,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.slip.ui.theme.SlipTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 object AppRoutes {
     const val SLEEP_LIST = "sleep_list"
     const val SETTINGS = "settings"
+    const val MODEL_LAB = "model_lab"
 }
 
 class MainActivity : ComponentActivity() {
@@ -32,18 +36,16 @@ class MainActivity : ComponentActivity() {
     private val repository by lazy { SleepDataRepository.getInstance(this) }
 
     private val requestPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            val allGranted = permissions.entries.all { it.value }
-            if (allGranted) {
-                // Permissions have been granted.
-            } else {
-                // Inform the user that background features might not work correctly.
-            }
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+            // Permissions handled, attempt auto-start
+            autoStartMonitoring()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkAndRequestPermissions()
+        autoStartMonitoring()
+        
         setContent {
             SlipTheme {
                 AppMainScreen(repository = repository)
@@ -51,7 +53,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun checkAndRequestPermissions() {
+    private fun autoStartMonitoring() {
+        lifecycleScope.launch {
+            val isEnabled = repository.isMonitoringEnabled.first()
+            if (isEnabled) {
+                val serviceIntent = Intent(this@MainActivity, ScreenMonitorService::class.java)
+                ContextCompat.startForegroundService(this@MainActivity, serviceIntent)
+            }
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
         val permissionsToRequest = mutableListOf<String>()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -89,31 +101,42 @@ fun AppMainScreen(repository: SleepDataRepository) {
                     sessions = sessions,
                     repository = repository,
                     onDelete = { session -> repository.deleteSession(session) },
-                    onEdit = { session, newStart, newEnd, isSleep ->
-                        repository.editSession(session, newStart, newEnd, isSleep)
+                    onEdit = { session, newStart, newEnd, category ->
+                        repository.editSession(session, newStart, newEnd, category)
                     },
                     onAdd = { newSession -> repository.addSleepSession(newSession) },
-                    onLabel = { session, isRealSleep -> repository.labelSession(session, isRealSleep) },
-                    onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) }
+                    onLabel = { session, category -> 
+                        repository.labelSessionById(session.id, category) 
+                    },
+                    onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) },
+                    onNavigateToModelLab = { navController.navigate(AppRoutes.MODEL_LAB) }
                 )
             }
             composable(AppRoutes.SETTINGS) {
                 val settings by repository.userSettings.collectAsState(initial = UserSettings.default)
                 val sessions by repository.sessions.collectAsState(initial = emptyList())
-                val coroutineScope = rememberCoroutineScope()
+                val scope = rememberCoroutineScope()
 
                 SettingsScreen(
                     settings = settings,
                     sessions = sessions,
                     onSettingsChanged = { newSettings ->
-                        coroutineScope.launch {
+                        scope.launch {
                             repository.saveUserSettings(newSettings)
                         }
                     },
                     onAddSession = { session ->
                         repository.addSleepSession(session)
                     },
-                    navController = navController
+                    repository = repository
+                )
+            }
+            composable(AppRoutes.MODEL_LAB) {
+                val sessions by repository.sessions.collectAsState(initial = emptyList())
+                ModelLabScreen(
+                    sessions = sessions,
+                    repository = repository,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
         }

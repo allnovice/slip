@@ -3,118 +3,155 @@ package com.example.slip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.max
 import kotlin.math.min
 
-// A data class to hold the processed sleep blocks for drawing
-private data class SleepBlock(
-    val startOffsetPercent: Float,
-    val heightPercent: Float,
-    val session: SleepSession
-)
+@Composable
+fun SleepContributionGraph(
+    sessions: List<SleepSession>,
+    onDayClick: (Long) -> Unit = {}
+) {
+    var selectedYear by remember { mutableIntStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
+
+    val daysData = remember(sessions, selectedYear) {
+        val sleepSessions = sessions.filter { it.category == SleepSession.CATEGORY_SLEEP }
+        val napSessions = sessions.filter { it.category == SleepSession.CATEGORY_NAP }
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.YEAR, selectedYear)
+            set(Calendar.MONTH, Calendar.JANUARY)
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        while (calendar.get(Calendar.DAY_OF_WEEK) != Calendar.SUNDAY) calendar.add(Calendar.DAY_OF_YEAR, -1)
+        
+        List(53 * 7) {
+            val start = calendar.timeInMillis
+            val end = start + 24 * 3600 * 1000
+            val sleepSecs = sleepSessions.sumOf { s ->
+                val oS = max(s.startTimeMillis, start)
+                val oE = min(s.endTimeMillis, end)
+                if (oS < oE) (oE - oS) / 1000 else 0L
+            }
+            val hasNap = napSessions.any { s ->
+                val oS = max(s.startTimeMillis, start)
+                val oE = min(s.endTimeMillis, end)
+                oS < oE
+            }
+            val result = Triple(start, sleepSecs, hasNap)
+            calendar.add(Calendar.DAY_OF_YEAR, 1)
+            result
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = selectedYear.toString(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Black,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+            Row {
+                IconButton(onClick = { selectedYear-- }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.ChevronLeft, contentDescription = "Prev Year", modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = { selectedYear++ }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.ChevronRight, contentDescription = "Next Year", modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            daysData.chunked(7).forEach { week ->
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    week.forEach { (dayStart, secs, hasNap) ->
+                        val color = when {
+                            secs == 0L -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                            secs < 7 * 3600 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                            hasNap -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.primary
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .padding(1.dp)
+                                .background(color)
+                                .clickable { onDayClick(dayStart) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 fun SleepGanttChart(
     sessions: List<SleepSession>,
     onSessionClick: (SleepSession) -> Unit = {}
 ) {
-    // --- 1. Prepare the data ---
-    // The data for each day will now be a list of SleepBlocks
-    val weeklyData: List<Pair<String, List<SleepBlock>>> = (6 downTo 0).map { daysAgo ->
-        val dayCalendar = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_YEAR, -daysAgo)
-        }
+    val weeklyData = (6 downTo 0).map { daysAgo ->
+        val dayCalendar = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -daysAgo) }
+        dayCalendar.set(Calendar.HOUR_OF_DAY, 0); dayCalendar.set(Calendar.MINUTE, 0); dayCalendar.set(Calendar.SECOND, 0)
+        val dayStart = dayCalendar.timeInMillis
+        val dayEnd = dayStart + 24 * 3600 * 1000
 
-        // Get the label for the day (e.g., "Fri")
-        val dayLabel = SimpleDateFormat("EEE", Locale.getDefault()).format(dayCalendar.time)
-
-        // Set the calendar to the start of this day (midnight)
-        dayCalendar.set(Calendar.HOUR_OF_DAY, 0)
-        dayCalendar.set(Calendar.MINUTE, 0)
-        dayCalendar.set(Calendar.SECOND, 0)
-        val dayStartMillis = dayCalendar.timeInMillis
-        val dayEndMillis = dayStartMillis + 24 * 3600 * 1000
-
-        // Find all sleep sessions that overlap with this day
-        val sleepBlocksForDay = sessions.filter { it.isRealSleep == true }
+        sessions.filter { it.category == SleepSession.CATEGORY_SLEEP }
             .mapNotNull { session ->
-                // Find the portion of the session that falls within this 24-hour day
-                val overlapStart = max(session.startTimeMillis, dayStartMillis)
-                val overlapEnd = min(session.endTimeMillis, dayEndMillis)
-
-                if (overlapStart >= overlapEnd) {
-                    null // No overlap
-                } else {
-                    // Calculate the position and height of the sleep block as a percentage of the day
-                    val startOffsetMillis = overlapStart - dayStartMillis
-                    val durationMillis = overlapEnd - overlapStart
-
-                    val startOffsetPercent = startOffsetMillis / (24 * 3600 * 1000f)
-                    val heightPercent = durationMillis / (24 * 3600 * 1000f)
-
-                    SleepBlock(startOffsetPercent, heightPercent, session)
+                val overlapStart = max(session.startTimeMillis, dayStart)
+                val overlapEnd = min(session.endTimeMillis, dayEnd)
+                if (overlapStart >= overlapEnd) null else {
+                    val startOffset = (overlapStart - dayStart) / (24 * 3600 * 1000f)
+                    val heightPercent = (overlapEnd - overlapStart) / (24 * 3600 * 1000f)
+                    Triple(startOffset, heightPercent, session)
                 }
             }
-        Pair(dayLabel, sleepBlocksForDay)
     }
 
-    // --- 2. Draw the chart ---
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp, horizontal = 8.dp)
-            .height(150.dp), // Fixed height for the chart area
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.Bottom
+        modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(1.dp)
     ) {
-        weeklyData.forEach { (day, blocks) ->
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Bottom,
-                modifier = Modifier.weight(1f)
+        weeklyData.forEach { blocks ->
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
             ) {
-                // This Box represents the full 24-hour day bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.5f) // The width of the "track"
-                        .height(120.dp) // The height of the 24h timeline
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    // For each sleep block, draw a colored Box inside the timeline
-                    blocks.forEach { block ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                // Position the block vertically based on its start time
-                                .padding(top = (120 * block.startOffsetPercent).dp)
-                                // Set the height of the block based on its duration
-                                .height((120 * block.heightPercent).dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable { onSessionClick(block.session) }
-                        )
-                    }
+                blocks.forEach { (start, height, session) ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(height)
+                            .offset(y = (start * 200).dp) 
+                            .background(MaterialTheme.colorScheme.primary)
+                            .clickable { onSessionClick(session) }
+                    )
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                // Day Label
-                Text(
-                    text = day,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
             }
         }
     }

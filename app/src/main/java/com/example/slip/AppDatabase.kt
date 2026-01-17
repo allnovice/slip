@@ -3,8 +3,7 @@ package com.example.slip
 import android.content.Context
 import androidx.room.*
 
-@Database(entities = [SleepSession::class], version = 1, exportSchema = false)
-@TypeConverters(Converters::class)
+@Database(entities = [SleepSession::class], version = 6, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun sleepSessionDao(): SleepSessionDao
@@ -20,7 +19,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "sleep_database"
                 )
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance
                 instance

@@ -2,10 +2,9 @@ package com.example.slip
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -13,31 +12,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 
 class SleepTrackingService : Service() {
 
     private val repository: SleepDataRepository by lazy { SleepDataRepository.getInstance(applicationContext) }
-
     private var startTime: Long = 0
 
     companion object {
         val isRunning = MutableStateFlow(false)
-        const val NOTIFICATION_ID = 1
+        const val TRACKING_NOTIFICATION_ID = 1
+        const val INTERACTIVE_NOTIFICATION_ID = 2
         const val CHANNEL_ID = "SleepTrackingServiceChannel"
     }
 
     override fun onCreate() {
         super.onCreate()
         isRunning.value = true
-        Log.d("SleepTrackingService", "Service Created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (startTime == 0L) {
             startTime = System.currentTimeMillis()
-            Log.d("SleepTrackingService", "Sleep tracking STARTED at: $startTime")
-
             createNotificationChannel()
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Sleep Tracking Active")
@@ -45,12 +43,8 @@ class SleepTrackingService : Service() {
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setPriority(NotificationCompat.PRIORITY_MIN)
                 .build()
-
-            startForeground(NOTIFICATION_ID, notification)
-        } else {
-            Log.d("SleepTrackingService", "Service already running. Ignoring duplicate start command.")
+            startForeground(TRACKING_NOTIFICATION_ID, notification)
         }
-
         return START_STICKY
     }
 
@@ -60,62 +54,97 @@ class SleepTrackingService : Service() {
             val endTime = System.currentTimeMillis()
             val seconds = (endTime - startTime) / 1000
 
-            // --- DYNAMIC CLASSIFICATION ---
-            val classifierData = runBlocking(Dispatchers.IO) {
-                val settings = repository.userSettings.first()
-                val count = repository.getSessionCount()
-                val stats = repository.getDurationStats() 
-                Triple(settings, count, stats)
+            // Skip anything less than 1 hour
+            if (seconds < 3600) {
+                Log.d("SleepTrackingService", "Session too short ($seconds s). Discarding.")
+                startTime = 0L
+                super.onDestroy()
+                return
             }
 
-            // Determine current target bedtime hour
-            val startCal = Calendar.getInstance().apply { timeInMillis = startTime }
-            val dayOfWeek = startCal.get(Calendar.DAY_OF_WEEK)
-            val isWeekend = (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY)
-            val targetHour = if (isWeekend) classifierData.first.weekendSleepStart.hour else classifierData.first.weekdaySleepStart.hour
+            val result = runBlocking(Dispatchers.IO) {
+                val settings: UserSettings = repository.userSettings.first()
+                val customPath: String? = repository.userMlModelPath.first()
+                val customMeans: List<Float> = repository.userMlMeans.first()
+                val customStds: List<Float> = repository.userMlStds.first()
 
-            val classifier = DynamicSleepClassifier(
-                context = applicationContext,
-                settings = classifierData.first,
-                sessionCount = classifierData.second,
-                durationStats = classifierData.third
-            )
+                val targetHour = settings.getTargetHourFor(startTime)
 
-            // Fix: Pass targetHour to isRealSleep
-            val isSleep: Boolean = classifier.isRealSleep(
-                startTimeMillis = startTime, 
-                durationSeconds = seconds, 
-                targetHour = targetHour
-            )
+                // 1. Calculate PURE Heuristic (Dumb Model / The Standard)
+                val heuristicClassifier = HeuristicClassifier()
+                val rawHeuristic = heuristicClassifier.classify(startTime, seconds, targetHour)
 
-            Log.d("SleepTrackingService", "Session of $seconds s. Count: ${classifierData.second}. Target: $targetHour. Sleep? $isSleep.")
+                // 2. Calculate ML Engine Result (The Competitor - for logging/lab only)
+                val engine = ModelLabEngine(
+                    customPath = customPath,
+                    customMeans = customMeans,
+                    customStds = customStds
+                )
+                val mlGuess = engine.runAll(startTime, seconds, targetHour)
 
+                Log.d("SleepTrackingService", "Session End. Standard (Base): $rawHeuristic, ML Competitor: $mlGuess")
+
+                Triple(mlGuess, rawHeuristic, targetHour)
+            }
+
+            // Truth and Base both start with the Rules (The Standard)
             val session = SleepSession(
                 startTimeMillis = startTime,
                 endTimeMillis = endTime,
                 durationSeconds = seconds,
-                isRealSleep = isSleep,
-                targetBedtimeHour = targetHour
+                category = result.second,          // TRUTH starts as Base Rules
+                heuristicCategory = result.second, // BASE is always the Rules
+                targetBedtimeHour = result.third
             )
 
             repository.addSleepSession(session)
+
+            // ONLY trigger Nap Notification if the Standard (Rules) detects a nap.
+            // This ensures the notification is confirming the database's initial state.
+            if (result.second == SleepSession.CATEGORY_NAP) {
+                sendNapConfirmationNotification(session)
+            }
         }
         startTime = 0L
         super.onDestroy()
-        Log.d("SleepTrackingService", "Service Destroyed and session saved.")
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
+    private fun sendNapConfirmationNotification(session: SleepSession) {
+        val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
+        val timeRange = "${timeFormatter.format(session.startTimeMillis)} - ${timeFormatter.format(session.endTimeMillis)}"
+
+        val confirmIntent = Intent(this, NotificationActionReceiver::class.java).apply {
+            action = "ACTION_CONFIRM_NAP"
+            putExtra("session_id", session.id)
+            putExtra("notification_id", INTERACTIVE_NOTIFICATION_ID)
+        }
+        val confirmPendingIntent = PendingIntent.getBroadcast(this, 0, confirmIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val idleIntent = Intent(this, NotificationActionReceiver::class.java).apply {
+            action = "ACTION_MARK_IDLE"
+            putExtra("session_id", session.id)
+            putExtra("notification_id", INTERACTIVE_NOTIFICATION_ID)
+        }
+        val idlePendingIntent = PendingIntent.getBroadcast(this, 1, idleIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Did you just take a nap?")
+            .setContentText("Detected session: $timeRange")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .addAction(R.drawable.ic_launcher_foreground, "Yes, it was a nap", confirmPendingIntent)
+            .addAction(R.drawable.ic_launcher_foreground, "No, phone was idle", idlePendingIntent)
+            .build()
+
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(INTERACTIVE_NOTIFICATION_ID, notification)
     }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotificationChannel() {
-        val serviceChannel = NotificationChannel(
-            CHANNEL_ID,
-            "Sleep Tracking Service Channel",
-            NotificationManager.IMPORTANCE_MIN
-        )
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(serviceChannel)
+        val serviceChannel = NotificationChannel(CHANNEL_ID, "Sleep Tracking", NotificationManager.IMPORTANCE_MIN)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(serviceChannel)
     }
 }
