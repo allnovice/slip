@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,6 +45,10 @@ class SleepDataRepository private constructor(
 
     val useUserMlModel: Flow<Boolean> = dataStore.data.map { preferences ->
         preferences[PreferencesKeys.USE_USER_ML_MODEL] ?: false
+    }
+    
+    val naiveBayesModelPath: Flow<String?> = dataStore.data.map { preferences ->
+        preferences[PreferencesKeys.NAIVE_BAYES_MODEL_PATH]
     }
 
     val userMlModelPath: Flow<String?> = dataStore.data.map { preferences ->
@@ -163,6 +168,45 @@ class SleepDataRepository private constructor(
         }
     }
 
+    suspend fun generateAndSaveNaiveBayesModel(context: Context): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val sessions = sessions.first() // Get current sessions
+                if (sessions.isEmpty()) return@withContext null
+
+                val model = NaiveBayesClassifier.train(sessions)
+                val json = NaiveBayesClassifier.toJson(model)
+                val file = File(context.filesDir, "naive_bayes_model.json")
+                file.writeText(json)
+
+                val path = file.absolutePath
+                dataStore.edit { preferences ->
+                    preferences[PreferencesKeys.NAIVE_BAYES_MODEL_PATH] = path
+                }
+                path
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
+        }
+    }
+
+    suspend fun deleteNaiveBayesModel(context: Context) {
+        withContext(Dispatchers.IO) {
+            try {
+                val file = File(context.filesDir, "naive_bayes_model.json")
+                if (file.exists()) {
+                    file.delete()
+                }
+                dataStore.edit { preferences ->
+                    preferences.remove(PreferencesKeys.NAIVE_BAYES_MODEL_PATH)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     suspend fun backfillCustomPredictions(context: Context, path: String, means: List<Float>, stds: List<Float>) { }
 
     private object PreferencesKeys {
@@ -176,6 +220,7 @@ class SleepDataRepository private constructor(
         val USER_ML_STDS = stringPreferencesKey("user_ml_stds")
         val IS_MONITORING_ENABLED = booleanPreferencesKey("is_monitoring_enabled")
         val SLEEP_TARGET_HOURS = intPreferencesKey("sleep_target_hours")
+        val NAIVE_BAYES_MODEL_PATH = stringPreferencesKey("naive_bayes_model_path")
     }
 
     companion object {

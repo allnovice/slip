@@ -1,21 +1,24 @@
 package com.example.slip
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
@@ -116,6 +119,9 @@ fun AppMainScreen(repository: SleepDataRepository) {
                 val settings by repository.userSettings.collectAsState(initial = UserSettings.default)
                 val sessions by repository.sessions.collectAsState(initial = emptyList())
                 val scope = rememberCoroutineScope()
+                val context = LocalContext.current
+
+                var isGenerating by remember { mutableStateOf(false) }
 
                 SettingsScreen(
                     settings = settings,
@@ -128,7 +134,30 @@ fun AppMainScreen(repository: SleepDataRepository) {
                     onAddSession = { session ->
                         repository.addSleepSession(session)
                     },
-                    repository = repository
+                    repository = repository,
+                    onGenerateNaiveBayesModel = {
+                        if (sessions.isNotEmpty()) {
+                            isGenerating = true
+                            scope.launch {
+                                val path = repository.generateAndSaveNaiveBayesModel(context)
+                                isGenerating = false
+                                if (path != null) {
+                                    Toast.makeText(context, "Naive Bayes model generated!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to generate model.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } else {
+                            Toast.makeText(context, "Not enough data to generate a model.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    isGeneratingNaiveBayesModel = isGenerating,
+                    onDeleteNaiveBayesModel = {
+                        scope.launch {
+                            repository.deleteNaiveBayesModel(context)
+                            Toast.makeText(context, "Naive Bayes model deactivated.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 )
             }
             composable(AppRoutes.MODEL_LAB) {

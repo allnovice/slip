@@ -1,7 +1,12 @@
 package com.example.slip
 
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ModelTraining
 import androidx.compose.material.icons.filled.Upload
@@ -30,7 +36,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -40,7 +48,10 @@ fun SettingsScreen(
     sessions: List<SleepSession>,
     onSettingsChanged: (UserSettings) -> Unit,
     onAddSession: (SleepSession) -> Unit,
-    repository: SleepDataRepository
+    repository: SleepDataRepository,
+    onGenerateNaiveBayesModel: () -> Unit,
+    isGeneratingNaiveBayesModel: Boolean,
+    onDeleteNaiveBayesModel: () -> Unit
 ) {
     val context = LocalContext.current
     var tempSettings by remember(settings) { mutableStateOf(settings) }
@@ -52,6 +63,7 @@ fun SettingsScreen(
     val userMlPath by repository.userMlModelPath.collectAsState(initial = null)
     val userMlMeans by repository.userMlMeans.collectAsState(initial = emptyList())
     val userMlStds by repository.userMlStds.collectAsState(initial = emptyList())
+    val naiveBayesModelPath by repository.naiveBayesModelPath.collectAsState(initial = null)
 
     var showDocDialog by remember { mutableStateOf(false) }
     val meanTexts = remember { mutableStateListOf<String>() }
@@ -60,6 +72,8 @@ fun SettingsScreen(
     var customFeatureCount by remember { mutableIntStateOf(0) }
     var isCalibrated by remember { mutableStateOf(false) }
     val modelExists = remember(userMlPath) { userMlPath?.let { File(it).exists() } ?: false }
+    val nbModelExists = remember(naiveBayesModelPath) { naiveBayesModelPath?.let { File(it).exists() } ?: false }
+
 
     LaunchedEffect(userMlPath, modelExists) {
         val path = userMlPath
@@ -87,7 +101,7 @@ fun SettingsScreen(
     ) { uri: Uri? ->
         uri?.let {
             coroutineScope.launch {
-                val success = importCsv(context, it, onAddSession, settings)
+                val success = importCsv(context, it, onAddSession)
                 if (success) {
                     Toast.makeText(context, "Imported!", Toast.LENGTH_SHORT).show()
                 } else {
@@ -183,11 +197,63 @@ fun SettingsScreen(
         // --- 2. AI SECTION ---
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("User ML Model", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("AI Models", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { showDocDialog = true }) { Icon(Icons.Default.Book, null, tint = MaterialTheme.colorScheme.primary) }
             }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row {
+                        Text("Naive Bayes Classifier", fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.weight(1f))
+                        if (nbModelExists) {
+                            Text("Active", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
 
+                    Text("A simple, fast, probabilistic classifier based on applying Bayes\' theorem with strong (naive) independence assumptions between the features. It\'s a good baseline model.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+
+                    if (nbModelExists) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = onGenerateNaiveBayesModel,
+                                enabled = !isGeneratingNaiveBayesModel,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isGeneratingNaiveBayesModel) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                                } else {
+                                    Text("Re-generate")
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onDeleteNaiveBayesModel,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Deactivate Model")
+                                Spacer(Modifier.width(4.dp))
+                                Text("Deactivate")
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = onGenerateNaiveBayesModel,
+                            enabled = !isGeneratingNaiveBayesModel,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isGeneratingNaiveBayesModel) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+                            } else {
+                                Icon(Icons.Default.ModelTraining, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Generate & Activate Model")
+                            }
+                        }
+                    }
+                }
+            }
+            
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -285,12 +351,15 @@ fun SettingsScreen(
                 }
 
                 OutlinedButton(onClick = {
-                    val header = "id,startTimeMillis,endTimeMillis,durationSeconds,category,heuristicCategory,targetBedtimeHour\n"
-                    val csvContent = sessions.joinToString(separator = "\n") { session ->
-                        "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.category},${session.heuristicCategory},${session.targetBedtimeHour}"
+                    coroutineScope.launch {
+                        val header = "id,startTimeMillis,endTimeMillis,durationSeconds,category,heuristicCategory,targetBedtimeHour\n"
+                        val csvContent = header + sessions.joinToString(separator = "\n") { session ->
+                            "${session.id},${session.startTimeMillis},${session.endTimeMillis},${session.durationSeconds},${session.category},${session.heuristicCategory},${session.targetBedtimeHour}"
+                        }
+                        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                        val fileName = "sleep_sessions_$timestamp.csv"
+                        saveCsvToFile(context, csvContent, fileName)
                     }
-                    // A function to save text to a file should be implemented here, e.g., saveTextToFile(context, text, fileName)
-                    Toast.makeText(context, "Exported!", Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -325,7 +394,7 @@ fun SettingsScreen(
     }
 }
 
-private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd: (SleepSession) -> Unit, settings: UserSettings): Boolean = withContext(Dispatchers.IO) {
+private suspend fun importCsv(context: Context, uri: Uri, onAdd: (SleepSession) -> Unit): Boolean = withContext(Dispatchers.IO) {
     try {
         val dateFormat = SimpleDateFormat("MM/dd/yy h:mm a", Locale.US)
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -370,6 +439,32 @@ private suspend fun importCsv(context: android.content.Context, uri: Uri, onAdd:
     } catch (_: Exception) { false }
 }
 
-// A function to save text to a file needs to be implemented here.
-// Example:
-// fun saveTextToFile(context: android.content.Context, text: String, fileName: String) { ... }
+private suspend fun saveCsvToFile(context: Context, content: String, fileName: String) = withContext(Dispatchers.IO) {
+    try {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/csv")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+        }
+
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Exported to Downloads folder", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Failed to create file in MediaStore", Toast.LENGTH_LONG).show()
+            }
+        }
+    } catch (e: IOException) {
+        e.printStackTrace()
+        withContext(Dispatchers.Main) {
+            Toast.makeText(context, "Error exporting file", Toast.LENGTH_LONG).show()
+        }
+    }
+}
